@@ -1,20 +1,19 @@
 spring:
   datasource:
     url: ${DATABASE_URL}
-    username: ${DATABASE_USERNAME}
-    password: ${DATABASE_PASSWORD}
   
-  data:
-    redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update
 
 jwt:
   secret: ${JWT_SECRET}
 
+cors:
+  allowed-origins: ${CORS_ORIGINS}
+
 logging:
   level:
-    root: WARN
+    root: INFO
     ai.mindvex: INFO
-    org.springframework.security: WARN
+    org.springframework.security: INFO
