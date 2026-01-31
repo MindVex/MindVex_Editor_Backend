@@ -97,7 +97,9 @@ public class WatsonxService {
                     )
             );
 
-            String apiPath = "/api/v1/agents/" + agentId + "/runs";
+            String apiPath = "/api/v1/agents/" + agentId
+               + "/runs?environment_id=" + config.getAgentEnvironmentId();
+
 
             @SuppressWarnings("unchecked")
             Map<String, Object> runResponse = orchestrateWebClient.post()
@@ -134,7 +136,8 @@ public class WatsonxService {
 
                 @SuppressWarnings("unchecked")
                 Map<String, Object> statusResponse = orchestrateWebClient.get()
-                        .uri("/api/v1/agents/{agentId}/runs/{runId}", agentId, runId)
+                        .uri("/api/v1/agents/{agentId}/runs/{runId}?environment_id={envId}",
+     agentId, runId, config.getAgentEnvironmentId())
                         .header("Authorization", "Bearer " + token)
                         .retrieve()
                         .bodyToMono(Map.class)

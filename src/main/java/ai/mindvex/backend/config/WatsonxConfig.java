@@ -6,16 +6,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.function.client.WebClient;
 
-/**
- * Configuration for IBM watsonx Orchestrate integration.
- * Loads credentials from environment variables.
- * 
- * Required environment variables:
- * - WATSONX_API_KEY: IBM Cloud API key
- * - WATSONX_ORCHESTRATE_ENDPOINT: The Orchestrate runtime endpoint
- * 
- * Agent IDs are configured per deployed agent in watsonx Orchestrate.
- */
 @Data
 @Configuration
 @ConfigurationProperties(prefix = "watsonx")
@@ -30,7 +20,10 @@ public class WatsonxConfig {
     // IAM Token URL
     private String iamUrl;
 
-    // Deployed Agent IDs (from watsonx Orchestrate)
+    // ✅ ADD THIS (Agent Environment ID)
+    private String agentEnvironmentId;
+
+    // Deployed Agent IDs
     private AgentIds agents;
 
     @Data
@@ -54,7 +47,7 @@ public class WatsonxConfig {
                 .baseUrl(baseUrl)
                 .codecs(configurer -> configurer
                         .defaultCodecs()
-                        .maxInMemorySize(10 * 1024 * 1024)) // 10MB buffer for large responses
+                        .maxInMemorySize(10 * 1024 * 1024))
                 .build();
     }
 }
