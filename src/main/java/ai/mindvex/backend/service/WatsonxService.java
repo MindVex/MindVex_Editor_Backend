@@ -97,7 +97,7 @@ public class WatsonxService {
                     )
             );
 
-            String apiPath = "/v1/agents/" + agentId + "/runs";
+            String apiPath = "/api/v1/agents/" + agentId + "/runs";
 
             @SuppressWarnings("unchecked")
             Map<String, Object> runResponse = orchestrateWebClient.post()
@@ -134,7 +134,7 @@ public class WatsonxService {
 
                 @SuppressWarnings("unchecked")
                 Map<String, Object> statusResponse = orchestrateWebClient.get()
-                        .uri("/v1/agents/{agentId}/runs/{runId}", agentId, runId)
+                        .uri("/api/v1/agents/{agentId}/runs/{runId}", agentId, runId)
                         .header("Authorization", "Bearer " + token)
                         .retrieve()
                         .bodyToMono(Map.class)
