@@ -121,3 +121,10 @@ springdoc:
     path: /swagger-ui.html
     operations-sorter: method
     tags-sorter: alpha
+
+# IBM watsonx Orchestrate Configuration
+watsonx:
+  api-key: ${WATSONX_API_KEY:}
+  space-id: ${WATSONX_SPACE_ID:}
+  endpoint: ${WATSONX_ENDPOINT:https://us-south.ml.cloud.ibm.com}
+  iam-url: https://iam.cloud.ibm.com/identity/token

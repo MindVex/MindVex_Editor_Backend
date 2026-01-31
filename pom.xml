@@ -120,6 +120,10 @@
             <optional>true</optional>
         </dependency>
         
+        <!-- WebFlux for WebClient (watsonx API calls) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
         <!-- Email -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
