@@ -69,8 +69,7 @@ public class RepositoryCloneController {
                 if (githubToken != null && !githubToken.isBlank()) {
                     log.info("[Clone] Using GitHub authentication");
                     cloneCmd.setCredentialsProvider(
-                            new UsernamePasswordCredentialsProvider("oauth2", githubToken)
-                    );
+                            new UsernamePasswordCredentialsProvider("oauth2", githubToken));
                 }
 
                 Git git = cloneCmd.call();
@@ -91,8 +90,7 @@ public class RepositoryCloneController {
                         true,
                         "Repository cloned successfully",
                         tempDir.getFileName().toString(),
-                        files
-                ));
+                        files));
 
             } catch (Exception e) {
                 // Clean up on error
@@ -122,8 +120,7 @@ public class RepositoryCloneController {
                     false,
                     "Failed to clone repository: " + errorMessage,
                     null,
-                    null
-            ));
+                    null));
         }
     }
 
@@ -186,18 +183,19 @@ public class RepositoryCloneController {
     }
 
     // Request/Response DTOs
-    public record CloneRequest(String url) {}
+    public record CloneRequest(String url) {
+    }
 
     public record CloneResponse(
             boolean success,
             String message,
             String workdir,
-            Map<String, FileData> files
-    ) {}
+            Map<String, FileData> files) {
+    }
 
     public record FileData(
             String content,
             String encoding,
-            boolean binary
-    ) {}
+            boolean binary) {
+    }
 }

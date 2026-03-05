@@ -100,9 +100,10 @@ public class GitProxyController {
         try {
           UserDetails userDetails = (UserDetails) authentication.getPrincipal();
           User user = userRepository.findByEmail(userDetails.getUsername()).orElse(null);
-          
+
           if (user != null && user.getGithubAccessToken() != null && !user.getGithubAccessToken().isBlank()) {
-            // Use Basic Auth with token as password (GitHub's preferred method for HTTPS git operations)
+            // Use Basic Auth with token as password (GitHub's preferred method for HTTPS
+            // git operations)
             String token = user.getGithubAccessToken();
             outgoingHeaders.setBasicAuth("oauth2", token);
             log.debug("[GitProxy] Using GitHub authentication for: {}", targetUrl);
@@ -139,7 +140,7 @@ public class GitProxyController {
 
     } catch (Exception e) {
       log.error("[GitProxy] Error proxying request to {}: {}", targetUrl, e.getMessage());
-      
+
       return ResponseEntity
           .status(HttpStatus.BAD_GATEWAY)
           .body(("Git proxy error: " + e.getMessage()).getBytes());
