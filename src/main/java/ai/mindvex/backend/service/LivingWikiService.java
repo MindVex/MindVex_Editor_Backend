@@ -533,30 +533,42 @@ public class LivingWikiService {
             // ═══════════════════════════════════════════════════════════════════════════
             // STAGE 1: EXTRACT ENDPOINTS INTO STRUCTURED DATA
             // ═══════════════════════════════════════════════════════════════════════════
-            
+
             log.info("[LivingWiki] [Stage 1] Extracting and cleaning endpoints from {} chunks", chunks.size());
-            
-            // Calculate batch size for extraction (smaller for rate limits)
-            int maxCharsPerBatch = 8000;
+
+            // Calculate batch size for extraction (reduced to 5KB to stay under rate limits)
+            // 5000 chars ≈ 1250 tokens input + 1500 tokens output = ~2750 total
+            // This ensures we stay well under the 6000 TPM limit even with recent usage
+            int maxCharsPerBatch = 5000;
             List<List<String>> batches = createBatches(chunks, maxCharsPerBatch);
             log.info("[LivingWiki] Created {} batches for endpoint extraction", batches.size());
 
+            // Wait 60s before starting to ensure sliding window is clear from previous API calls
+            if (batches.size() > 0) {
+                log.info("[LivingWiki] Waiting 60s to clear rate limit sliding window before starting...");
+                try {
+                    Thread.sleep(60000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
             // Extract endpoints from each batch
             List<ExtractedEndpoint> allEndpoints = new ArrayList<>();
-            
+
             for (int i = 0; i < batches.size(); i++) {
                 log.info("[LivingWiki] [Stage 1] Extracting from batch {}/{}", i + 1, batches.size());
 
                 String batchContext = String.join("\n", batches.get(i));
-                
+
                 // Use DataCleaningService to extract structured endpoints
                 List<ExtractedEndpoint> batchEndpoints = dataCleaningService.extractEndpointsFromChunks(
-                    batchContext, provider);
-                
+                        batchContext, provider);
+
                 if (!batchEndpoints.isEmpty()) {
                     allEndpoints.addAll(batchEndpoints);
-                    log.info("[LivingWiki] ✓ Extracted {} endpoints from batch {}/{}", 
-                        batchEndpoints.size(), i + 1, batches.size());
+                    log.info("[LivingWiki] ✓ Extracted {} endpoints from batch {}/{}",
+                            batchEndpoints.size(), i + 1, batches.size());
                 } else {
                     log.warn("[LivingWiki] ✗ No endpoints extracted from batch {}/{}", i + 1, batches.size());
                 }
@@ -587,8 +599,8 @@ public class LivingWikiService {
             // STAGE 2: GENERATE PROFESSIONAL MARKDOWN FROM CLEANED DATA
             // ═══════════════════════════════════════════════════════════════════════════
 
-            log.info("[LivingWiki] [Stage 2] Generating professional API documentation from {} cleaned endpoints", 
-                cleanedEndpoints.size());
+            log.info("[LivingWiki] [Stage 2] Generating professional API documentation from {} cleaned endpoints",
+                    cleanedEndpoints.size());
 
             // Extract API name from repo URL
             String apiName = "API";
@@ -601,9 +613,9 @@ public class LivingWikiService {
 
             // Use DocumentFormattingService for professional output
             String finalDoc = documentFormattingService.formatApiReference(cleanedEndpoints, apiName);
-            
-            log.info("[LivingWiki] ✓ Professional API reference generated ({} chars, {} endpoints)", 
-                finalDoc.length(), cleanedEndpoints.size());
+
+            log.info("[LivingWiki] ✓ Professional API reference generated ({} chars, {} endpoints)",
+                    finalDoc.length(), cleanedEndpoints.size());
             return finalDoc;
 
         } catch (Exception e) {
@@ -650,8 +662,9 @@ public class LivingWikiService {
                 return generateSingleFileDirect("README.md", truncated, provider);
             }
 
-            // Calculate batch size (aim for ~8KB per batch = ~2000 tokens)
-            int maxCharsPerBatch = 8000;
+            // Calculate batch size (reduced to 5KB to stay under rate limits)
+            // 5000 chars ≈ 1250 tokens input + 1500 tokens output = ~2750 total
+            int maxCharsPerBatch = 5000;
             List<List<String>> batches = createBatches(chunks, maxCharsPerBatch);
             log.info("[LivingWiki] Created {} batches for README generation", batches.size());
 

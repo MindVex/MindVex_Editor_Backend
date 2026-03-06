@@ -44,7 +44,7 @@ Endpoints are automatically grouped into logical categories:
 
 Each endpoint follows this structure:
 
-```markdown
+````markdown
 #### METHOD /endpoint/path
 
 **Description**
@@ -57,9 +57,9 @@ Yes / No
 
 **Parameters**
 
-| Name | Type | Location | Required | Description |
-| ---- | ---- | -------- | -------- | ----------- |
-| param1 | string | query | Yes | Parameter description |
+| Name   | Type   | Location | Required | Description           |
+| ------ | ------ | -------- | -------- | --------------------- |
+| param1 | string | query    | Yes      | Parameter description |
 
 **Request Body**
 
@@ -68,6 +68,7 @@ Yes / No
   "example": "value"
 }
 ```
+````
 
 **Response (200)**
 
@@ -79,13 +80,14 @@ Yes / No
 
 **Possible Errors**
 
-* 400 Bad Request
-* 401 Unauthorized
-* 404 Not Found
-* 500 Internal Server Error
+- 400 Bad Request
+- 401 Unauthorized
+- 404 Not Found
+- 500 Internal Server Error
 
 ---
-```
+
+````
 
 ### Formatting Rules
 
@@ -156,31 +158,36 @@ Container build and run instructions
 | Command | Description |
 | ------- | ----------- |
 | command | What it does |
-```
+````
 
 ### Content Guidelines
 
 **Features Section**
+
 - Bullet list format
 - Concise, benefit-focused descriptions
 - Highlight key differentiators
 
 **Tech Stack**
+
 - Bold technology names
 - Include version numbers when relevant
 - Group by category (Backend, Frontend, Database, etc.)
 
 **Installation**
+
 - Separate instructions for different platforms
 - Use code blocks with appropriate syntax highlighting
 - Include prerequisite checks
 
 **Configuration**
+
 - Show example `.env` file
 - Document all environment variables
 - Provide sensible defaults
 
 **Commands**
+
 - Present in table format for clarity
 - Include description for each command
 - Use proper syntax highlighting (bash, powershell, etc.)
@@ -188,6 +195,7 @@ Container build and run instructions
 ### Formatting Rules
 
 ✅ **DO:**
+
 - Use consistent markdown formatting
 - Preserve legitimate commands unchanged
 - Include platform-specific instructions
@@ -195,6 +203,7 @@ Container build and run instructions
 - Keep README concise but complete
 
 ❌ **DON'T:**
+
 - Remove or modify legitimate commands
 - Mix different formatting styles
 - Skip important configuration details
@@ -210,6 +219,7 @@ Container build and run instructions
 The documentation generation follows a two-stage approach:
 
 **Stage 1: Data Extraction & Cleaning** (DataCleaningService)
+
 - Parse code chunks into structured DTOs
 - Extract endpoint metadata, parameters, responses
 - Remove duplicates and merge overlapping data
@@ -217,6 +227,7 @@ The documentation generation follows a two-stage approach:
 - Preserve commands and environment variables unchanged
 
 **Stage 2: Professional Formatting** (DocumentFormattingService)
+
 - Transform clean DTOs into markdown
 - Apply consistent formatting rules
 - Group endpoints by category
@@ -226,6 +237,7 @@ The documentation generation follows a two-stage approach:
 ### Key Services
 
 **DocumentFormattingService**
+
 - `formatApiReference()` - Generates professional API documentation
 - `formatReadme()` - Generates GitHub-quality README
 - `formatSingleEndpoint()` - Formats individual endpoints
@@ -233,6 +245,7 @@ The documentation generation follows a two-stage approach:
 - `determineCategory()` - Categorizes endpoints intelligently
 
 **DataCleaningService**
+
 - `extractEndpointsFromChunks()` - Parses code to structured data
 - `cleanAndDeduplicateEndpoints()` - Removes duplicates, merges data
 - `standardizeDescription()` - Normalizes text
@@ -268,7 +281,7 @@ The documentation generation follows a two-stage approach:
 
 ### Professional Endpoint Documentation
 
-```markdown
+````markdown
 #### POST /auth/login
 
 **Description**
@@ -281,10 +294,10 @@ No
 
 **Parameters**
 
-| Name | Type | Location | Required | Description |
-| ---- | ---- | -------- | -------- | ----------- |
-| password | string | body | Yes | User's password |
-| username | string | body | Yes | User's email or username |
+| Name     | Type   | Location | Required | Description              |
+| -------- | ------ | -------- | -------- | ------------------------ |
+| password | string | body     | Yes      | User's password          |
+| username | string | body     | Yes      | User's email or username |
 
 **Request Body**
 
@@ -294,6 +307,7 @@ No
   "password": "securePassword123"
 }
 ```
+````
 
 **Response (200)**
 
@@ -307,9 +321,10 @@ No
 
 **Possible Errors**
 
-* 400 Bad Request - Invalid credentials format
-* 401 Unauthorized - Incorrect username or password
-* 500 Internal Server Error
+- 400 Bad Request - Invalid credentials format
+- 401 Unauthorized - Incorrect username or password
+- 500 Internal Server Error
+
 ```
 
 ---
@@ -346,3 +361,4 @@ These standards are inspired by:
 - [REST API Documentation Standards](https://swagger.io/specification/)
 - [OpenAPI Specification](https://spec.openapis.org/oas/latest.html)
 - Industry best practices from popular open-source projects
+```
