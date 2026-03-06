@@ -80,34 +80,32 @@ public class LivingWikiService {
             try {
                 log.info("[LivingWiki] Retrieving semantic context via embeddings (count={})", embeddingCount);
 
-                // Multi-aspect semantic search for comprehensive understanding
-                // REDUCED queries and chunks to avoid "Payload Too Large" errors
-                String[] queries = {
+                // ═══ ENHANCED MULTI-STAGE SEARCH FOR COMPREHENSIVE API ANALYSIS ═══
+                
+                // Stage 1: General codebase understanding (keep original limits)
+                String[] generalQueries = {
                         "main entry point, startup, initialization",
-                        "API endpoints, routes, controllers",
-                        "data models, entities, database schema"
+                        "data models, entities, database schema",
+                        "configuration, settings, environment variables"
                 };
 
                 Set<String> seenChunks = new HashSet<>();
                 int totalChunks = 0;
-                int maxTotalChunks = 10; // Limit total chunks to avoid token overflow
-                int maxChunkLength = 500; // Truncate long chunks
+                int maxGeneralChunks = 8;
+                int maxChunkLength = 600;
 
-                for (String query : queries) {
-                    if (totalChunks >= maxTotalChunks)
-                        break; // Stop if limit reached
+                for (String query : generalQueries) {
+                    if (totalChunks >= maxGeneralChunks) break;
 
                     try {
                         List<VectorEmbedding> chunks = embeddingService.semanticSearch(userId, repoUrl, query, 2);
                         for (VectorEmbedding chunk : chunks) {
-                            if (totalChunks >= maxTotalChunks)
-                                break;
+                            if (totalChunks >= maxGeneralChunks) break;
 
                             String chunkId = chunk.getFilePath() + ":" + chunk.getChunkIndex();
                             if (!seenChunks.contains(chunkId)) {
                                 seenChunks.add(chunkId);
                                 String chunkText = chunk.getChunkText();
-                                // Truncate long chunks to save tokens
                                 if (chunkText.length() > maxChunkLength) {
                                     chunkText = chunkText.substring(0, maxChunkLength) + "...";
                                 }
@@ -118,12 +116,85 @@ public class LivingWikiService {
                             }
                         }
                     } catch (Exception e) {
-                        log.warn("[LivingWiki] Semantic search failed for query '{}': {}", query, e.getMessage());
+                        log.warn("[LivingWiki] General search failed for query '{}': {}", query, e.getMessage());
                     }
                 }
 
-                log.info("[LivingWiki] Retrieved {} unique code chunks (max {}) for semantic context",
-                        totalChunks, maxTotalChunks);
+                // Stage 2: COMPREHENSIVE API ROUTE/ENDPOINT DISCOVERY
+                // Search for framework-specific route patterns with HIGHER chunk limits
+                String[] apiQueries = {
+                        // Python frameworks
+                        "@app.route decorator Flask blueprint endpoint",
+                        "FastAPI @app.get @app.post @app.put @app.delete APIRouter",
+                        "Django urls.py path route urlpatterns views",
+                        
+                        // JavaScript/TypeScript frameworks
+                        "Express router.get router.post app.use middleware",
+                        "Next.js API route handler export async function",
+                        "NestJS @Controller @Get @Post decorator",
+                        
+                        // Java/Kotlin frameworks
+                        "@RestController @RequestMapping @GetMapping @PostMapping",
+                        "@Path @GET @POST JAX-RS REST endpoint",
+                        
+                        // Go frameworks
+                        "http.HandleFunc router.GET router.POST gin.Engine",
+                        
+                        // Ruby frameworks
+                        "Rails routes.rb get post put delete",
+                        
+                        // Generic route patterns
+                        "API endpoint route handler controller view",
+                        "REST HTTP GET POST PUT DELETE PATCH",
+                        "authentication login register auth route"
+                };
+
+                int apiChunksCount = 0;
+                int maxApiChunks = 40; // SIGNIFICANTLY HIGHER for API documentation
+                int maxRouteChunkLength = 1500; // DON'T truncate route definitions aggressively
+
+                semanticContext.append("\n\n═══ API ROUTES & ENDPOINTS ═══\n");
+                
+                for (String query : apiQueries) {
+                    if (apiChunksCount >= maxApiChunks) break;
+
+                    try {
+                        // Retrieve MORE chunks per query for comprehensive coverage
+                        List<VectorEmbedding> chunks = embeddingService.semanticSearch(userId, repoUrl, query, 4);
+                        for (VectorEmbedding chunk : chunks) {
+                            if (apiChunksCount >= maxApiChunks) break;
+
+                            String chunkId = chunk.getFilePath() + ":" + chunk.getChunkIndex();
+                            if (!seenChunks.contains(chunkId)) {
+                                seenChunks.add(chunkId);
+                                String chunkText = chunk.getChunkText();
+                                
+                                // Check if this looks like a route/controller file
+                                String filePath = chunk.getFilePath().toLowerCase();
+                                boolean isRouteFile = filePath.contains("route") || filePath.contains("controller") 
+                                        || filePath.contains("endpoint") || filePath.contains("api")
+                                        || filePath.contains("view") || filePath.contains("handler");
+                                
+                                // Don't truncate route files as aggressively
+                                int maxLen = isRouteFile ? maxRouteChunkLength : maxChunkLength;
+                                if (chunkText.length() > maxLen) {
+                                    chunkText = chunkText.substring(0, maxLen) + "\n... (truncated)";
+                                }
+                                
+                                semanticContext.append("\n// ").append(chunk.getFilePath())
+                                        .append(" (chunk ").append(chunk.getChunkIndex()).append(")\n")
+                                        .append(chunkText).append("\n");
+                                apiChunksCount++;
+                                totalChunks++;
+                            }
+                        }
+                    } catch (Exception e) {
+                        log.warn("[LivingWiki] API search failed for query '{}': {}", query, e.getMessage());
+                    }
+                }
+
+                log.info("[LivingWiki] Retrieved {} total chunks ({} general + {} API) for comprehensive context",
+                        totalChunks, totalChunks - apiChunksCount, apiChunksCount);
             } catch (Exception e) {
                 log.warn("[LivingWiki] Could not retrieve semantic context: {}", e.getMessage());
             }
@@ -462,6 +533,38 @@ public class LivingWikiService {
                 Files to generate:
 
                 1. README.md — Comprehensive project documentation with the following REQUIRED sections:
+                
+                   **🚨 CRITICAL INSTRUCTIONS FOR README GENERATION 🚨**
+                   
+                   1. **ANALYZE THE CODE CHUNKS PROVIDED BELOW**
+                      - Review the "API ROUTES & ENDPOINTS" section for API understanding
+                      - Review general code chunks for tech stack identification
+                      - Look for package.json, pom.xml, requirements.txt, go.mod for dependencies
+                      - Look for main entry points (main.py, app.py, index.js, Application.java)
+                      - Look for configuration files (config.py, application.properties, .env.example)
+                   
+                   2. **EXTRACT FACTUAL INFORMATION FROM CODE**
+                      - Tech Stack: Identify from import statements, decorators, annotations
+                        * Python: `from flask import`, `from fastapi import`, `import django` → Flask/FastAPI/Django
+                        * Java: `import org.springframework` → Spring Boot
+                        * JavaScript: `import express`, `import React` → Express/React
+                      - Features: Extract from route definitions and their descriptions
+                        * If you see `/auth/login` and `/auth/register` → Authentication system
+                        * If you see `/posts` and `/timeline` → Social media posting
+                        * If you see `/inbox` and `/outbox` → Federation support
+                   
+                   3. **DO NOT HALLUCINATE**
+                      - ONLY document technologies you can CONFIRM from code chunks
+                      - ONLY describe features you can SEE in the route/controller definitions
+                      - If you don't see database code, don't claim "Uses PostgreSQL"
+                      - If you don't see Redis imports, don't claim "Caching with Redis"
+                   
+                   4. **PROJECT STRUCTURE**
+                      - Use the "Module Structure" section provided below
+                      - DO NOT invent folders that are not listed
+                   
+                   **README.md Structure:**
+                
                    # Project Title
                    - Clear, descriptive title as H1 header
                    - 1-2 sentence description of what the project does, its purpose, and problem it solves
@@ -470,35 +573,36 @@ public class LivingWikiService {
                    - Anchor links to all major sections for quick navigation
 
                    ## Features
-                   - Bulleted list of key features and functionality
+                   - Bulleted list of key features and functionality (EXTRACT from API endpoints)
                    - Highlight what makes this project stand out
 
                    ## Tech Stack
-                   - List technologies with versions (e.g., Java 21, Spring Boot 3.2.1, React 18)
+                   - List technologies with versions (EXTRACT from code imports/decorators)
                    - Include frameworks, libraries, and tools used
+                   - Example: If you see `@app.route` → Flask; `@app.get` → FastAPI; `@RequestMapping` → Spring Boot
 
                    ## Installation and Setup
                    ### Prerequisites
-                   - Required software, libraries, OS versions
+                   - Required software, libraries, OS versions (INFER from tech stack)
                    - System requirements
 
                    ### Installation Steps
                    - Step-by-step commands to clone repo
-                   - Dependency installation commands (npm install, mvn install, etc.)
+                   - Dependency installation commands (match to detected tech stack)
 
                    ### Configuration
-                   - Environment variables needed
+                   - Environment variables needed (look for env variable usage in code chunks)
                    - Configuration files to set up
                    - Database setup if applicable
 
                    ## Usage Examples
                    - Clear instructions with code snippets
-                   - Command-line examples
+                   - Command-line examples (match to tech stack)
                    - Expected output descriptions
 
                    ## Project Structure
                    - Brief overview of main directories and their purpose
-                   - ASCII tree of key folders (do NOT hallucinate, use actual structure provided)
+                   - ASCII tree of key folders (USE ONLY folders from "Module Structure" section below)
 
                    ## Contributing
                    - Guidelines for bug reports
@@ -520,7 +624,7 @@ public class LivingWikiService {
                    - Current development stage (active, maintenance, etc.)
                    - Roadmap of planned features (if applicable)
 
-                   CRITICAL: Base ALL content on the actual repository structure provided below. DO NOT invent features, dependencies, or technologies that aren't evident in the structure. If information is missing, state "To be documented" rather than hallucinating.
+                   CRITICAL: Base ALL content on the actual repository structure and code chunks provided below. DO NOT invent features, dependencies, or technologies that aren't evident in the code. If information is missing, state "To be documented" rather than hallucinating.
 
                 2. adr.md — Architecture Decision Records (ADRs)
 
@@ -590,7 +694,36 @@ public class LivingWikiService {
 
                 3. api-reference.md — Complete API Reference Documentation
                    
-                   **CRITICAL: Analyze actual source code files (controllers, routes, handlers) to extract factual API details. This is the PRIMARY SOURCE OF TRUTH for API documentation.**
+                   **🚨 CRITICAL INSTRUCTIONS FOR API DOCUMENTATION 🚨**
+                   
+                   1. **ANALYZE THE CODE CHUNKS PROVIDED IN "API ROUTES & ENDPOINTS" SECTION BELOW**
+                      - These are actual route definitions, controller methods, and endpoint handlers from the repository
+                      - Extract HTTP methods (GET, POST, PUT, DELETE, etc.)
+                      - Extract endpoint paths (e.g., /api/users, /auth/login, /posts/{id})
+                      - Extract parameter names, types, and locations (path, query, body)
+                      - Extract request/response schemas from the code
+                   
+                   2. **DO NOT HALLUCINATE ENDPOINTS**
+                      - ONLY document endpoints that you can SEE in the provided code chunks
+                      - If you see: `@app.route("/auth/login", methods=["POST"])` → Document: POST /auth/login
+                      - If you see: `router.get("/get_posts")` → Document: GET /get_posts
+                      - If you see: `@GetMapping("/users/{username}")` → Document: GET /users/{username}
+                   
+                   3. **PRESERVE EXACT ENDPOINT PATHS**
+                      - Use the EXACT path as written in the code (don't normalize or change it)
+                      - If code says `/get_posts`, write `/get_posts` (NOT `/posts`)
+                      - If code says `/connect/accept/{connection_id}`, write that EXACTLY
+                   
+                   4. **EXTRACT DETAILS FROM CODE**
+                      - Look for decorators: @app.route, @app.get, @PostMapping, router.post, etc.
+                      - Look for function parameters to identify request parameters
+                      - Look for request body parsing (request.json, @RequestBody, etc.)
+                      - Look for authentication checks (@require_auth, Authentication, etc.)
+                   
+                   5. **IF INFORMATION IS MISSING**
+                      - If you can't determine authentication requirements: state "To be verified"
+                      - If you can't see request body schema: provide basic structure or state "To be documented"
+                      - DO NOT invent parameters that aren't in the code
                    
                    **Structure Requirements:**
                    
@@ -1026,6 +1159,9 @@ public class LivingWikiService {
                 Files to generate:
 
                 1. README.md — Comprehensive project documentation with these REQUIRED sections:
+                
+                   **🚨 ANALYZE CODE CHUNKS BELOW - Extract tech stack from imports/decorators, features from API endpoints. DO NOT HALLUCINATE.**
+                
                    # Project Title
                    - Clear, descriptive title
                    - 1-2 sentence description of purpose and problem solved
@@ -1034,14 +1170,14 @@ public class LivingWikiService {
                    - Anchor links to all major sections
 
                    ## Features
-                   - Bulleted list of key features
+                   - Bulleted list of key features (EXTRACT from API endpoints in code chunks)
 
                    ## Tech Stack
-                   - Technologies with versions (e.g., Java 21, Spring Boot 3.2.1)
+                   - Technologies with versions (IDENTIFY from imports: Flask/@app.route, FastAPI/@app.get, Spring/@RequestMapping, Express/router.get)
 
                    ## Installation and Setup
                    ### Prerequisites
-                   - Required software and versions
+                   - Required software and versions (MATCH to detected tech stack)
                    ### Installation Steps
                    - Step-by-step clone and dependency installation
                    ### Configuration
@@ -1068,7 +1204,7 @@ public class LivingWikiService {
                    ## Project Status
                    - Development stage and roadmap
 
-                   CRITICAL: Base content on actual repository structure. DO NOT invent features or technologies. Use "To be documented" if info is missing.
+                   CRITICAL: Base content on actual repository structure and code chunks. DO NOT invent features or technologies. Use "To be documented" if info is missing.
 
                 2. adr.md — Architecture Decision Records
                    **USE GitHub Architecture Decision Records section (if provided) to create factual ADRs from actual commits/PRs/issues.**
@@ -1089,7 +1225,12 @@ public class LivingWikiService {
                    If no GitHub data, infer from code structure only. DO NOT hallucinate.
                 
                 3. api-reference.md — Complete API Reference
-                   **Analyze controllers/routes files to extract factual endpoint details.**
+                   **🚨 ANALYZE "API ROUTES & ENDPOINTS" CODE CHUNKS - Extract actual endpoints. PRESERVE EXACT PATHS. DO NOT HALLUCINATE.**
+                   
+                   **CRITICAL:**
+                   - Extract endpoints from code: @app.route("/auth/login") → POST /auth/login
+                   - Use EXACT paths from code: /get_posts NOT /posts, /connect/accept/{id} NOT /connections/{id}
+                   - Extract params from code: def login(username: str, password: str) → Parameters: username, password
                    
                    Structure:
                    # [API Name] API Reference
@@ -1097,7 +1238,7 @@ public class LivingWikiService {
                    ## Base URL (production and development URLs)
                    ## Endpoints
                    
-                   For EACH endpoint found in code:
+                   For EACH endpoint found in code chunks:
                    ### [HTTP Method] [Path]
                    - **Description:** What the endpoint does
                    - **Authentication Required:** Yes/No
@@ -1110,11 +1251,11 @@ public class LivingWikiService {
                    - **Error Responses:** 400, 401, 404, 500 with JSON examples
                    - **Code Examples:** cURL, Python (requests library), JavaScript (Node.js fetch and Axios)
                    
-                   CRITICAL Analysis Order:
-                   1. API spec files (openapi.yaml, swagger.json) - PRIMARY SOURCE
-                   2. Controllers (@RestController, @RequestMapping, routes, handlers)
-                   3. Type definitions (DTOs, interfaces, models, schemas)
-                   4. Code comments (JavaDoc, Swagger annotations, docstrings)
+                   CRITICAL Analysis Process:
+                   1. Read "API ROUTES & ENDPOINTS" section below carefully
+                   2. Extract routes from decorators/annotations: @app.route, @app.get, @PostMapping, router.post
+                   3. Extract parameters from function signatures
+                   4. Document ONLY what you SEE in code chunks - NO invention
                    5. Test files (working examples of API usage)
                    
                    Quality: Use actual paths, parameters, response types from code. Include ALL endpoints.
