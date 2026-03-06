@@ -40,6 +40,7 @@ public class LivingWikiService {
     private final UserRepository userRepository;
     private final GitHubApiService githubApiService;
     private final DataCleaningService dataCleaningService;
+    private final DocumentFormattingService documentFormattingService;
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${gemini.api-key:#{null}}")
@@ -583,162 +584,31 @@ public class LivingWikiService {
             }
 
             // ═══════════════════════════════════════════════════════════════════════════
-            // STAGE 2: GENERATE MARKDOWN FROM CLEANED DATA
+            // STAGE 2: GENERATE PROFESSIONAL MARKDOWN FROM CLEANED DATA
             // ═══════════════════════════════════════════════════════════════════════════
 
-            log.info("[LivingWiki] [Stage 2] Generating markdown from {} cleaned endpoints", cleanedEndpoints.size());
+            log.info("[LivingWiki] [Stage 2] Generating professional API documentation from {} cleaned endpoints", 
+                cleanedEndpoints.size());
 
-            StringBuilder apiReference = new StringBuilder();
-            
-            // Header
-            apiReference.append("# API Reference\n\n");
-            
-            // Authentication section
-            boolean hasAuthEndpoints = cleanedEndpoints.stream().anyMatch(ExtractedEndpoint::isRequiresAuth);
-            apiReference.append("## Authentication\n\n");
-            if (hasAuthEndpoints) {
-                apiReference.append("This API uses authentication for protected endpoints. ");
-                apiReference.append("Include authentication credentials in requests to protected endpoints.\n\n");
-            } else {
-                apiReference.append("Authentication requirements will be documented for each endpoint.\n\n");
-            }
-            
-            // Base URL section
-            apiReference.append("## Base URL\n\n");
-            apiReference.append("```\n");
-            apiReference.append("Production: https://api.example.com\n");
-            apiReference.append("Development: http://localhost:8080/api\n");
-            apiReference.append("```\n\n");
-            
-            // Endpoints section
-            apiReference.append("## Endpoints\n\n");
-            
-            // Group endpoints by prefix/category
-            Map<String, List<ExtractedEndpoint>> groupedEndpoints = cleanedEndpoints.stream()
-                .collect(Collectors.groupingBy(e -> 
-                    e.getRouterPrefix() != null ? e.getRouterPrefix() : "General",
-                    LinkedHashMap::new,
-                    Collectors.toList()
-                ));
-            
-            // Generate documentation for each group
-            for (Map.Entry<String, List<ExtractedEndpoint>> group : groupedEndpoints.entrySet()) {
-                String category = group.getKey();
-                List<ExtractedEndpoint> endpoints = group.getValue();
-                
-                apiReference.append("### ").append(formatCategoryName(category)).append("\n\n");
-                
-                for (ExtractedEndpoint endpoint : endpoints) {
-                    apiReference.append(formatEndpointMarkdown(endpoint));
+            // Extract API name from repo URL
+            String apiName = "API";
+            if (repoUrl != null && !repoUrl.isBlank()) {
+                String[] parts = repoUrl.split("/");
+                if (parts.length > 0) {
+                    apiName = parts[parts.length - 1].replace(".git", "").replace("-", " ");
                 }
             }
 
-            String finalDoc = apiReference.toString();
-            log.info("[LivingWiki] ✓ API reference generated ({} chars, {} endpoints)", 
+            // Use DocumentFormattingService for professional output
+            String finalDoc = documentFormattingService.formatApiReference(cleanedEndpoints, apiName);
+            
+            log.info("[LivingWiki] ✓ Professional API reference generated ({} chars, {} endpoints)", 
                 finalDoc.length(), cleanedEndpoints.size());
             return finalDoc;
 
         } catch (Exception e) {
             log.error("[LivingWiki] Failed to generate batched API reference: {}", e.getMessage(), e);
             return null;
-        }
-    }
-    
-    /**
-     * Format category name for display
-     */
-    private String formatCategoryName(String category) {
-        if ("General".equals(category)) {
-            return "General Endpoints";
-        }
-        // Remove leading slash and capitalize
-        String formatted = category.startsWith("/") ? category.substring(1) : category;
-        return formatted.substring(0, 1).toUpperCase() + formatted.substring(1) + " Endpoints";
-    }
-    
-    /**
-     * Format a single endpoint as markdown
-     */
-    private String formatEndpointMarkdown(ExtractedEndpoint endpoint) {
-        StringBuilder md = new StringBuilder();
-        
-        // Endpoint title
-        md.append("#### ").append(endpoint.getMethod()).append(" ").append(endpoint.getPath()).append("\n\n");
-        
-        // Description
-        md.append("**Description:** ").append(endpoint.getDescription()).append("\n\n");
-        
-        // Authentication
-        md.append("**Authentication:** ").append(endpoint.isRequiresAuth() ? "Required" : "Not required").append("\n\n");
-        
-        // Parameters
-        if (endpoint.getParameters() != null && !endpoint.getParameters().isEmpty()) {
-            md.append("**Parameters:**\n\n");
-            md.append("| Name | Type | Location | Required | Description |\n");
-            md.append("|------|------|----------|----------|-------------|\n");
-            
-            for (EndpointParameter param : endpoint.getParameters()) {
-                md.append("| ").append(param.getName())
-                  .append(" | ").append(param.getType() != null ? param.getType() : "string")
-                  .append(" | ").append(param.getLocation() != null ? param.getLocation() : "query")
-                  .append(" | ").append(param.isRequired() ? "Yes" : "No")
-                  .append(" | ").append(param.getDescription() != null ? param.getDescription() : "-")
-                  .append(" |\n");
-            }
-            md.append("\n");
-        }
-        
-        // Request body
-        if (endpoint.getRequestBody() != null && !endpoint.getRequestBody().isBlank()) {
-            md.append("**Request Body:**\n\n");
-            md.append("```json\n");
-            md.append(formatJson(endpoint.getRequestBody()));
-            md.append("\n```\n\n");
-        }
-        
-        // Response
-        if (endpoint.getResponseBody() != null && !endpoint.getResponseBody().isBlank()) {
-            md.append("**Response (200):**\n\n");
-            md.append("```json\n");
-            md.append(formatJson(endpoint.getResponseBody()));
-            md.append("\n```\n\n");
-        }
-        
-        // Error responses
-        if (endpoint.getErrorResponses() != null && !endpoint.getErrorResponses().isEmpty()) {
-            md.append("**Error Responses:**\n\n");
-            for (ErrorResponse error : endpoint.getErrorResponses()) {
-                md.append("**").append(error.getCode()).append(" ").append(error.getName()).append(":**\n");
-                if (error.getDescription() != null) {
-                    md.append(error.getDescription()).append("\n");
-                }
-                if (error.getExample() != null && !error.getExample().isBlank()) {
-                    md.append("```json\n");
-                    md.append(formatJson(error.getExample()));
-                    md.append("\n```\n");
-                }
-                md.append("\n");
-            }
-        }
-        
-        md.append("---\n\n");
-        
-        return md.toString();
-    }
-    
-    /**
-     * Format JSON string with proper indentation
-     */
-    private String formatJson(String json) {
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            Object obj = mapper.readValue(json, Object.class);
-            return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(obj);
-        } catch (Exception e) {
-            // If parsing fails, return as-is
-            return json;
-        }
-    }
         }
     }
 
