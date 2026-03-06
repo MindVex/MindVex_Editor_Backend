@@ -81,7 +81,7 @@ public class LivingWikiService {
                 log.info("[LivingWiki] Retrieving semantic context via embeddings (count={})", embeddingCount);
 
                 // ═══ ENHANCED MULTI-STAGE SEARCH FOR COMPREHENSIVE API ANALYSIS ═══
-                
+
                 // Stage 1: General codebase understanding (keep original limits)
                 String[] generalQueries = {
                         "main entry point, startup, initialization",
@@ -95,12 +95,14 @@ public class LivingWikiService {
                 int maxChunkLength = 600;
 
                 for (String query : generalQueries) {
-                    if (totalChunks >= maxGeneralChunks) break;
+                    if (totalChunks >= maxGeneralChunks)
+                        break;
 
                     try {
                         List<VectorEmbedding> chunks = embeddingService.semanticSearch(userId, repoUrl, query, 2);
                         for (VectorEmbedding chunk : chunks) {
-                            if (totalChunks >= maxGeneralChunks) break;
+                            if (totalChunks >= maxGeneralChunks)
+                                break;
 
                             String chunkId = chunk.getFilePath() + ":" + chunk.getChunkIndex();
                             if (!seenChunks.contains(chunkId)) {
@@ -127,22 +129,22 @@ public class LivingWikiService {
                         "@app.route decorator Flask blueprint endpoint",
                         "FastAPI @app.get @app.post @app.put @app.delete APIRouter",
                         "Django urls.py path route urlpatterns views",
-                        
+
                         // JavaScript/TypeScript frameworks
                         "Express router.get router.post app.use middleware",
                         "Next.js API route handler export async function",
                         "NestJS @Controller @Get @Post decorator",
-                        
+
                         // Java/Kotlin frameworks
                         "@RestController @RequestMapping @GetMapping @PostMapping",
                         "@Path @GET @POST JAX-RS REST endpoint",
-                        
+
                         // Go frameworks
                         "http.HandleFunc router.GET router.POST gin.Engine",
-                        
+
                         // Ruby frameworks
                         "Rails routes.rb get post put delete",
-                        
+
                         // Generic route patterns
                         "API endpoint route handler controller view",
                         "REST HTTP GET POST PUT DELETE PATCH",
@@ -154,33 +156,35 @@ public class LivingWikiService {
                 int maxRouteChunkLength = 1500; // DON'T truncate route definitions aggressively
 
                 semanticContext.append("\n\n═══ API ROUTES & ENDPOINTS ═══\n");
-                
+
                 for (String query : apiQueries) {
-                    if (apiChunksCount >= maxApiChunks) break;
+                    if (apiChunksCount >= maxApiChunks)
+                        break;
 
                     try {
                         // Retrieve MORE chunks per query for comprehensive coverage
                         List<VectorEmbedding> chunks = embeddingService.semanticSearch(userId, repoUrl, query, 4);
                         for (VectorEmbedding chunk : chunks) {
-                            if (apiChunksCount >= maxApiChunks) break;
+                            if (apiChunksCount >= maxApiChunks)
+                                break;
 
                             String chunkId = chunk.getFilePath() + ":" + chunk.getChunkIndex();
                             if (!seenChunks.contains(chunkId)) {
                                 seenChunks.add(chunkId);
                                 String chunkText = chunk.getChunkText();
-                                
+
                                 // Check if this looks like a route/controller file
                                 String filePath = chunk.getFilePath().toLowerCase();
-                                boolean isRouteFile = filePath.contains("route") || filePath.contains("controller") 
+                                boolean isRouteFile = filePath.contains("route") || filePath.contains("controller")
                                         || filePath.contains("endpoint") || filePath.contains("api")
                                         || filePath.contains("view") || filePath.contains("handler");
-                                
+
                                 // Don't truncate route files as aggressively
                                 int maxLen = isRouteFile ? maxRouteChunkLength : maxChunkLength;
                                 if (chunkText.length() > maxLen) {
                                     chunkText = chunkText.substring(0, maxLen) + "\n... (truncated)";
                                 }
-                                
+
                                 semanticContext.append("\n// ").append(chunk.getFilePath())
                                         .append(" (chunk ").append(chunk.getChunkIndex()).append(")\n")
                                         .append(chunkText).append("\n");
@@ -310,30 +314,176 @@ public class LivingWikiService {
             log.info("[LivingWiki] No GitHub token available, skipping architecture context from GitHub");
         }
 
-        if (provider != null) {
-            try {
-                String aiResponse = callAiForWiki(context.toString(), provider);
-                Map<String, String> files = parseResponse(aiResponse);
-                if (files.size() > 1)
-                    return files;
-                log.warn("[LivingWiki] Provider '{}' returned only 1 file, trying Gemini", provider.get("name"));
-            } catch (Exception e) {
-                log.warn("[LivingWiki] Provider '{}' failed: {}", provider.get("name"), e.getMessage());
+        // ═══════════════════════════════════════════════════════════════════════
+        // GENERATE EACH DOCUMENTATION FILE SEPARATELY TO AVOID PAYLOAD TOO LARGE
+        // ═══════════════════════════════════════════════════════════════════════
+        
+        Map<String, String> documentationFiles = new LinkedHashMap<>();
+        
+        try {
+            log.info("[LivingWiki] Generating documentation files separately to avoid payload size issues");
+            
+            // File 1: README.md (general understanding)
+            log.info("[LivingWiki] [1/3] Generating README.md...");
+            String readmeContext = buildReadmeContext(context.toString(), semanticContext.toString());
+            String readme = generateSingleFile("README.md", readmeContext, provider);
+            if (readme != null && !readme.isBlank()) {
+                documentationFiles.put("README.md", readme);
+                log.info("[LivingWiki] ✓ README.md generated ({} chars)", readme.length());
             }
-        }
-
-        // Generate with Gemini if API key available
-        if (geminiApiKey != null && !geminiApiKey.isBlank()) {
-            try {
-                return parseResponse(callGeminiForWiki(context.toString()));
-            } catch (Exception e) {
-                log.warn("[LivingWiki] Gemini failed: {}", e.getMessage());
+            
+            // File 2: ADR.md (architecture decisions)
+            log.info("[LivingWiki] [2/3] Generating adr.md...");
+            String adrContext = buildAdrContext(context.toString());
+            String adr = generateSingleFile("adr.md", adrContext, provider);
+            if (adr != null && !adr.isBlank()) {
+                documentationFiles.put("adr.md", adr);
+                log.info("[LivingWiki] ✓ adr.md generated ({} chars)", adr.length());
             }
+            
+            // File 3: api-reference.md (API documentation)
+            log.info("[LivingWiki] [3/3] Generating api-reference.md...");
+            String apiContext = buildApiContext(context.toString(), semanticContext.toString());
+            String apiRef = generateSingleFile("api-reference.md", apiContext, provider);
+            if (apiRef != null && !apiRef.isBlank()) {
+                documentationFiles.put("api-reference.md", apiRef);
+                log.info("[LivingWiki] ✓ api-reference.md generated ({} chars)", apiRef.length());
+            }
+            
+            if (documentationFiles.size() >= 2) {
+                log.info("[LivingWiki] Successfully generated {} documentation files", documentationFiles.size());
+                return documentationFiles;
+            }
+            
+            log.warn("[LivingWiki] Only generated {} files, using fallback", documentationFiles.size());
+            
+        } catch (Exception e) {
+            log.error("[LivingWiki] Failed to generate documentation files: {}", e.getMessage(), e);
         }
 
         // Static fallback
         log.info("[LivingWiki] Using static fallback for repo={}", repoUrl);
         return Map.of("README.md", generateFallbackWiki(repoUrl, moduleFiles, allFiles.size(), deps.size()));
+    }
+
+    /**
+     * Build focused context for README.md generation.
+     * Includes: repository structure, general code chunks (NOT API-specific)
+     */
+    private String buildReadmeContext(String structureContext, String semanticContext) {
+        StringBuilder readmeCtx = new StringBuilder();
+        readmeCtx.append(structureContext); // Repository structure, file counts
+        
+        // Extract ONLY general code chunks (NOT the "API ROUTES & ENDPOINTS" section)
+        if (semanticContext != null && semanticContext.contains("═══ API ROUTES & ENDPOINTS ═══")) {
+            String generalChunks = semanticContext.substring(0, semanticContext.indexOf("═══ API ROUTES & ENDPOINTS ═══"));
+            readmeCtx.append("\n\n─── Representative Code Samples ───\n");
+            readmeCtx.append(generalChunks);
+        } else {
+            readmeCtx.append("\n\n─── Representative Code Samples ───\n");
+            readmeCtx.append(semanticContext != null ? semanticContext : "");
+        }
+        
+        return readmeCtx.toString();
+    }
+
+    /**
+     * Build focused context for ADR.md generation.
+     * Includes: GitHub commits, PRs, issues (architecture decisions)
+     */
+    private String buildAdrContext(String structureContext) {
+        // Extract only the GitHub Architecture Decision Records section
+        if (structureContext.contains("─── GitHub Architecture Decision Records ───")) {
+            int startIdx = structureContext.indexOf("─── GitHub Architecture Decision Records ───");
+            String githubSection = structureContext.substring(startIdx);
+            
+            // Take only repo URL and GitHub data (not file lists)
+            String repoUrl = structureContext.substring(
+                structureContext.indexOf("Repository: "), 
+                structureContext.indexOf("\n", structureContext.indexOf("Repository: "))
+            );
+            
+            return repoUrl + "\n\n" + githubSection;
+        }
+        
+        // Minimal context if no GitHub data
+        return structureContext.substring(0, Math.min(1000, structureContext.length()));
+    }
+
+    /**
+     * Build focused context for api-reference.md generation.
+     * Includes: API route chunks ONLY
+     */
+    private String buildApiContext(String structureContext, String semanticContext) {
+        StringBuilder apiCtx = new StringBuilder();
+        
+        // Add minimal repo info
+        if (structureContext.contains("Repository: ")) {
+            String repoUrl = structureContext.substring(
+                structureContext.indexOf("Repository: "), 
+                structureContext.indexOf("\n", structureContext.indexOf("Repository: "))
+            );
+            apiCtx.append(repoUrl).append("\n\n");
+        }
+        
+        // Extract ONLY the "API ROUTES & ENDPOINTS" section
+        if (semanticContext != null && semanticContext.contains("═══ API ROUTES & ENDPOINTS ═══")) {
+            String apiChunks = semanticContext.substring(semanticContext.indexOf("═══ API ROUTES & ENDPOINTS ═══"));
+            apiCtx.append(apiChunks);
+        } else {
+            // Fallback: use all semantic context if no API section found
+            apiCtx.append("─── Code Analysis ───\n");
+            apiCtx.append(semanticContext != null ? semanticContext : "No code chunks available");
+        }
+        
+        return apiCtx.toString();
+    }
+
+    /**
+     * Generate a single documentation file with focused context.
+     * Returns the file content as a plain string (not wrapped in delimiters).
+     */
+    private String generateSingleFile(String fileName, String focusedContext, Map<String, Object> provider) {
+        log.info("[LivingWiki] Generating {} with context size: {} chars", fileName, focusedContext.length());
+        
+        try {
+            if (provider != null) {
+                String response = callAiForSingleFile(fileName, focusedContext, provider);
+                if (response != null && !response.isBlank()) {
+                    return cleanSingleFileResponse(response);
+                }
+            }
+            
+            // Fallback to Gemini
+            if (geminiApiKey != null && !geminiApiKey.isBlank()) {
+                String response = callGeminiForSingleFile(fileName, focusedContext);
+                if (response != null && !response.isBlank()) {
+                    return cleanSingleFileResponse(response);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[LivingWiki] Failed to generate {}: {}", fileName, e.getMessage());
+        }
+        
+        return null;
+    }
+
+    /**
+     * Remove any ===FILE:=== delimiters or markdown code blocks from single file response.
+     */
+    private String cleanSingleFileResponse(String response) {
+        if (response == null) return "";
+        
+        // Remove ===FILE: filename=== delimiter if present
+        response = response.replaceAll("===FILE:\\s*[^=]+===\\s*", "");
+        
+        // Remove markdown code block wrappers if present
+        if (response.trim().startsWith("```")) {
+            response = response.replaceFirst("^```[a-z]*\\s*", "");
+            response = response.replaceFirst("```\\s*$", "");
+        }
+        
+        return response.trim();
     }
 
     private Map<String, String> parseResponse(String response) {
@@ -533,16 +683,16 @@ public class LivingWikiService {
                 Files to generate:
 
                 1. README.md — Comprehensive project documentation with the following REQUIRED sections:
-                
+
                    **🚨 CRITICAL INSTRUCTIONS FOR README GENERATION 🚨**
-                   
+
                    1. **ANALYZE THE CODE CHUNKS PROVIDED BELOW**
                       - Review the "API ROUTES & ENDPOINTS" section for API understanding
                       - Review general code chunks for tech stack identification
                       - Look for package.json, pom.xml, requirements.txt, go.mod for dependencies
                       - Look for main entry points (main.py, app.py, index.js, Application.java)
                       - Look for configuration files (config.py, application.properties, .env.example)
-                   
+
                    2. **EXTRACT FACTUAL INFORMATION FROM CODE**
                       - Tech Stack: Identify from import statements, decorators, annotations
                         * Python: `from flask import`, `from fastapi import`, `import django` → Flask/FastAPI/Django
@@ -552,19 +702,19 @@ public class LivingWikiService {
                         * If you see `/auth/login` and `/auth/register` → Authentication system
                         * If you see `/posts` and `/timeline` → Social media posting
                         * If you see `/inbox` and `/outbox` → Federation support
-                   
+
                    3. **DO NOT HALLUCINATE**
                       - ONLY document technologies you can CONFIRM from code chunks
                       - ONLY describe features you can SEE in the route/controller definitions
                       - If you don't see database code, don't claim "Uses PostgreSQL"
                       - If you don't see Redis imports, don't claim "Caching with Redis"
-                   
+
                    4. **PROJECT STRUCTURE**
                       - Use the "Module Structure" section provided below
                       - DO NOT invent folders that are not listed
-                   
+
                    **README.md Structure:**
-                
+
                    # Project Title
                    - Clear, descriptive title as H1 header
                    - 1-2 sentence description of what the project does, its purpose, and problem it solves
@@ -693,46 +843,46 @@ public class LivingWikiService {
 
 
                 3. api-reference.md — Complete API Reference Documentation
-                   
+
                    **🚨 CRITICAL INSTRUCTIONS FOR API DOCUMENTATION 🚨**
-                   
+
                    1. **ANALYZE THE CODE CHUNKS PROVIDED IN "API ROUTES & ENDPOINTS" SECTION BELOW**
                       - These are actual route definitions, controller methods, and endpoint handlers from the repository
                       - Extract HTTP methods (GET, POST, PUT, DELETE, etc.)
                       - Extract endpoint paths (e.g., /api/users, /auth/login, /posts/{id})
                       - Extract parameter names, types, and locations (path, query, body)
                       - Extract request/response schemas from the code
-                   
+
                    2. **DO NOT HALLUCINATE ENDPOINTS**
                       - ONLY document endpoints that you can SEE in the provided code chunks
                       - If you see: `@app.route("/auth/login", methods=["POST"])` → Document: POST /auth/login
                       - If you see: `router.get("/get_posts")` → Document: GET /get_posts
                       - If you see: `@GetMapping("/users/{username}")` → Document: GET /users/{username}
-                   
+
                    3. **PRESERVE EXACT ENDPOINT PATHS**
                       - Use the EXACT path as written in the code (don't normalize or change it)
                       - If code says `/get_posts`, write `/get_posts` (NOT `/posts`)
                       - If code says `/connect/accept/{connection_id}`, write that EXACTLY
-                   
+
                    4. **EXTRACT DETAILS FROM CODE**
                       - Look for decorators: @app.route, @app.get, @PostMapping, router.post, etc.
                       - Look for function parameters to identify request parameters
                       - Look for request body parsing (request.json, @RequestBody, etc.)
                       - Look for authentication checks (@require_auth, Authentication, etc.)
-                   
+
                    5. **IF INFORMATION IS MISSING**
                       - If you can't determine authentication requirements: state "To be verified"
                       - If you can't see request body schema: provide basic structure or state "To be documented"
                       - DO NOT invent parameters that aren't in the code
-                   
+
                    **Structure Requirements:**
-                   
+
                    # [API Name] API Reference
-                   
+
                    > Brief 1-2 sentence description of the API's purpose and primary use cases.
-                   
+
                    ## Authentication
-                   
+
                    Describe authentication mechanism (Bearer token, API key, OAuth2, etc.):
                    - **Type**: Bearer JWT / API Key / OAuth2
                    - **Header Format**: `Authorization: Bearer <token>`
@@ -741,45 +891,45 @@ public class LivingWikiService {
                      ```bash
                      curl -H "Authorization: Bearer eyJhbGc..." https://api.example.com/endpoint
                      ```
-                   
+
                    ## Base URL
-                   
+
                    ```
                    Production: https://api.example.com
                    Development: http://localhost:8080/api
                    ```
-                   
+
                    ## Endpoints
-                   
+
                    **For EACH endpoint found in controllers/routes, use this exact format:**
-                   
+
                    ### [HTTP Method] [Endpoint Path]
-                   
+
                    **Description:** Clear 1-2 sentence explanation of what this endpoint does.
-                   
+
                    **HTTP Method:** GET | POST | PUT | PATCH | DELETE
-                   
+
                    **Endpoint URL:** `/api/resource/{id}`
-                   
+
                    **Authentication Required:** Yes | No
-                   
+
                    **Parameters:**
-                   
+
                    | Parameter | Type | Location | Required | Description | Example |
                    |-----------|------|----------|----------|-------------|---------|
                    | id | integer | path | Yes | Unique identifier | 123 |
                    | name | string | query | No | Filter by name | "John" |
                    | data | object | body | Yes | Request payload | See below |
-                   
+
                    **Request Headers:**
-                   
+
                    | Header | Required | Description | Example |
                    |--------|----------|-------------|---------|
                    | Authorization | Yes | Bearer JWT token | Bearer eyJhbGc... |
                    | Content-Type | Yes | Request content type | application/json |
-                   
+
                    **Request Body Example:**
-                   
+
                    ```json
                    {
                      "name": "Example Resource",
@@ -790,9 +940,9 @@ public class LivingWikiService {
                      }
                    }
                    ```
-                   
+
                    **Request Body Schema:**
-                   
+
                    | Field | Type | Required | Description |
                    |-------|------|----------|-------------|
                    | name | string | Yes | Resource name (max 100 chars) |
@@ -800,9 +950,9 @@ public class LivingWikiService {
                    | metadata | object | No | Additional metadata |
                    | metadata.category | string | No | Category tag |
                    | metadata.priority | integer | No | Priority level (1-5) |
-                   
+
                    **Success Response (200 OK):**
-                   
+
                    ```json
                    {
                      "id": 123,
@@ -812,9 +962,9 @@ public class LivingWikiService {
                      "updated_at": "2024-03-06T10:30:00Z"
                    }
                    ```
-                   
+
                    **Response Schema:**
-                   
+
                    | Field | Type | Description |
                    |-------|------|-------------|
                    | id | integer | Unique identifier |
@@ -822,9 +972,9 @@ public class LivingWikiService {
                    | type | string | Resource type |
                    | created_at | string (ISO 8601) | Creation timestamp |
                    | updated_at | string (ISO 8601) | Last update timestamp |
-                   
+
                    **Error Responses:**
-                   
+
                    **400 Bad Request:**
                    ```json
                    {
@@ -836,7 +986,7 @@ public class LivingWikiService {
                      }
                    }
                    ```
-                   
+
                    **401 Unauthorized:**
                    ```json
                    {
@@ -844,7 +994,7 @@ public class LivingWikiService {
                      "message": "Missing or invalid authorization token"
                    }
                    ```
-                   
+
                    **404 Not Found:**
                    ```json
                    {
@@ -852,7 +1002,7 @@ public class LivingWikiService {
                      "message": "Resource with ID 123 does not exist"
                    }
                    ```
-                   
+
                    **500 Internal Server Error:**
                    ```json
                    {
@@ -860,9 +1010,9 @@ public class LivingWikiService {
                      "message": "An unexpected error occurred"
                    }
                    ```
-                   
+
                    **Code Examples:**
-                   
+
                    **cURL:**
                    ```bash
                    curl -X POST https://api.example.com/api/resource \\
@@ -873,11 +1023,11 @@ public class LivingWikiService {
                        "type": "sample"
                      }'
                    ```
-                   
+
                    **Python (requests):**
                    ```python
                    import requests
-                   
+
                    url = "https://api.example.com/api/resource"
                    headers = {
                        "Authorization": "Bearer YOUR_TOKEN",
@@ -887,15 +1037,15 @@ public class LivingWikiService {
                        "name": "Example Resource",
                        "type": "sample"
                    }
-                   
+
                    response = requests.post(url, json=data, headers=headers)
                    print(response.json())
                    ```
-                   
+
                    **JavaScript (Node.js with fetch):**
                    ```javascript
                    const fetch = require('node-fetch');
-                   
+
                    const url = 'https://api.example.com/api/resource';
                    const options = {
                      method: 'POST',
@@ -908,17 +1058,17 @@ public class LivingWikiService {
                        type: 'sample'
                      })
                    };
-                   
+
                    fetch(url, options)
                      .then(res => res.json())
                      .then(data => console.log(data))
                      .catch(err => console.error(err));
                    ```
-                   
+
                    **JavaScript (Axios):**
                    ```javascript
                    const axios = require('axios');
-                   
+
                    const response = await axios.post(
                      'https://api.example.com/api/resource',
                      {
@@ -932,38 +1082,38 @@ public class LivingWikiService {
                        }
                      }
                    );
-                   
+
                    console.log(response.data);
                    ```
-                   
+
                    ---
-                   
+
                    **CRITICAL ANALYSIS REQUIREMENTS:**
-                   
+
                    To generate accurate API documentation, analyze these files in order of priority:
-                   
+
                    1. **API Specification Files** (PRIMARY SOURCE):
                       - openapi.yaml, swagger.json, api-spec.yaml
                       - These are the definitive source of truth for API contracts
-                   
+
                    2. **Controller/Route Files** (SECONDARY SOURCE):
                       - @RestController, @RequestMapping, @GetMapping, @PostMapping annotations (Spring Boot)
                       - Express routes, FastAPI decorators, Django views
                       - Extract: HTTP method, path, parameters, request/response types
-                   
+
                    3. **Type Definitions/Schemas**:
                       - TypeScript interfaces, Java DTOs, Python dataclasses
                       - Database models, ORM schemas
                       - Extract: field names, types, required/optional, constraints
-                   
+
                    4. **Code Comments/Docstrings**:
                       - JavaDoc, JSDoc, Python docstrings, Swagger annotations
                       - Extract: endpoint descriptions, parameter explanations
-                   
+
                    5. **Test Files**:
                       - API integration tests, request/response examples
                       - Extract: working examples of API usage, edge cases, error handling
-                   
+
                    **Quality Standards:**
                    - ✅ Use actual endpoint paths from code (@RequestMapping values)
                    - ✅ Use actual parameter names from method signatures
@@ -975,7 +1125,7 @@ public class LivingWikiService {
                    - ❌ DO NOT hallucinate endpoints that don't exist
                    - ❌ DO NOT invent parameter names or types
                    - ❌ DO NOT create fake example responses
-                   
+
                    If endpoint details are missing from code, state "To be documented" rather than guessing.
                 5. documentation-health.md — Health report analyzing coverage, clarity, and consistency. Provide a health score (X out of 100) based on actual code analysis.
 
@@ -1144,6 +1294,275 @@ public class LivingWikiService {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // SINGLE FILE GENERATION (TO AVOID PAYLOAD TOO LARGE)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Generate a single documentation file using AI provider.
+     * Much smaller payload than generating all 3 files at once.
+     */
+    private String callAiForSingleFile(String fileName, String focusedContext, Map<String, Object> provider) {
+        String prompt = buildSingleFilePrompt(fileName, focusedContext);
+        
+        String providerName = (String) provider.get("name");
+        String apiKey = (String) provider.get("apiKey");
+        String baseUrl = (String) provider.get("baseUrl");
+        String model = (String) provider.get("model");
+
+        log.info("[LivingWiki] Calling {} for {} (context: {} chars)", providerName, fileName, focusedContext.length());
+
+        if ("Ollama".equals(providerName) || "Groq".equals(providerName) || "XAI".equals(providerName)
+                || "OpenAI".equals(providerName) || "LMStudio".equals(providerName) || "Anthropic".equals(providerName)) {
+            
+            String url;
+            if ("Groq".equals(providerName))
+                url = "https://api.groq.com/openai/v1/chat/completions";
+            else if ("XAI".equals(providerName))
+                url = "https://api.x.ai/v1/chat/completions";
+            else if ("OpenAI".equals(providerName))
+                url = "https://api.openai.com/v1/chat/completions";
+            else if ("LMStudio".equals(providerName))
+                url = (baseUrl != null && !baseUrl.isEmpty() ? baseUrl : "http://localhost:1234")
+                        + "/v1/chat/completions";
+            else
+                url = (baseUrl != null && !baseUrl.isEmpty() ? baseUrl : "http://localhost:11434")
+                        + "/v1/chat/completions";
+
+            String safeModel = (model != null && !model.isBlank()) ? model : "llama3";
+            Map<String, Object> request = new java.util.LinkedHashMap<>();
+            request.put("model", safeModel);
+            request.put("messages", List.of(Map.of("role", "user", "content", prompt)));
+            request.put("max_tokens", 4000); // Reduced from 8000 since generating only 1 file
+            request.put("temperature", 0.3);
+            
+            HttpHeaders headers = new HttpHeaders();
+            if (apiKey != null && !apiKey.isBlank())
+                headers.setBearerAuth(apiKey);
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            
+            return extractReply(
+                    restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(request, headers), Map.class),
+                    providerName);
+        }
+
+        if ("Google".equals(providerName) || "Gemini".equals(providerName)) {
+            String key = apiKey != null && !apiKey.isBlank() ? apiKey : geminiApiKey;
+            if (key == null || key.isBlank())
+                throw new RuntimeException("Google/Gemini API key not configured");
+            String url = "https://generativelanguage.googleapis.com/v1beta/models/"
+                    + (model != null ? model : "gemini-2.0-flash") + ":generateContent?key=" + key;
+            Map<String, Object> body = Map.of(
+                    "contents", List.of(Map.of("parts", List.of(Map.of("text", prompt)))));
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            @SuppressWarnings("unchecked")
+            ResponseEntity<Map> resp = restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers),
+                    Map.class);
+            @SuppressWarnings("unchecked")
+            var candidates = (List<Map<String, Object>>) resp.getBody().get("candidates");
+            @SuppressWarnings("unchecked")
+            var parts2 = (List<Map<String, Object>>) ((Map<String, Object>) candidates.get(0).get("content"))
+                    .get("parts");
+            return (String) parts2.get(0).get("text");
+        }
+
+        throw new RuntimeException("Unsupported AI Provider: " + providerName);
+    }
+
+    /**
+     * Generate a single documentation file using Gemini (fallback).
+     */
+    @SuppressWarnings("unchecked")
+    private String callGeminiForSingleFile(String fileName, String focusedContext) {
+        String prompt = buildSingleFilePrompt(fileName, focusedContext);
+        
+        log.info("[LivingWiki] Calling Gemini for {} (context: {} chars)", fileName, focusedContext.length());
+
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="
+                + geminiApiKey;
+        Map<String, Object> body = Map.of(
+                "contents", List.of(Map.of("parts", List.of(Map.of("text", prompt)))));
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers),
+                Map.class);
+
+        var candidates = (List<Map<String, Object>>) response.getBody().get("candidates");
+        var parts = (List<Map<String, Object>>) ((Map<String, Object>) candidates.get(0).get("content"))
+                .get("parts");
+        return (String) parts.get(0).get("text");
+    }
+
+    /**
+     * Build a prompt for generating a single documentation file.
+     * Returns simpler, focused prompts to stay within token limits.
+     */
+    private String buildSingleFilePrompt(String fileName, String focusedContext) {
+        if ("README.md".equals(fileName)) {
+            return """
+                    You are a senior technical documentation engineer. Generate a comprehensive README.md for this repository.
+                    
+                    **CRITICAL: Extract information from the code provided below. DO NOT hallucinate.**
+                    
+                    Generate a README.md with these sections:
+                    
+                    # Project Title
+                    - Descriptive title
+                    - Brief description (1-2 sentences)
+                    
+                    ## Features
+                    - Key features (extract from API endpoints in code)
+                    
+                    ## Tech Stack
+                    - Extract from imports/decorators:
+                      * Python: `from flask import` → Flask, `from fastapi import` → FastAPI
+                      * Java: `import org.springframework` → Spring Boot
+                      * JavaScript: `import express` → Express
+                    
+                    ## Installation
+                    ### Prerequisites
+                    - Based on detected tech stack
+                    ### Installation Steps
+                    - Clone, dependencies, configuration
+                    
+                    ## Usage
+                    - Basic usage examples
+                    
+                    ## Project Structure
+                    - Main directories (use actual structure from context)
+                    
+                    ## Contributing, License, Support
+                    - Standard sections
+                    
+                    **Repository Context:**
+                    %s
+                    
+                    Output ONLY the README.md markdown content (no delimiters, no wrappers).
+                    """.formatted(focusedContext);
+                    
+        } else if ("adr.md".equals(fileName)) {
+            return """
+                    You are a senior technical documentation engineer. Generate Architecture Decision Records (ADRs) for this repository.
+                    
+                    **CRITICAL: Use ONLY the GitHub commits, PRs, and issues provided below. DO NOT invent decisions.**
+                    
+                    Generate 5-10 ADRs using this format for EACH:
+                    
+                    ### ADR-001: [Decision Title]
+                    
+                    **Status:** Accepted | Proposed | Deprecated
+                    
+                    **Context:**
+                    - Problem situation
+                    - Constraints (technical, business, time)
+                    - When decided (use GitHub dates)
+                    - Who proposed (use GitHub authors)
+                    
+                    **Decision:**
+                    - What was decided
+                    - Alternatives considered
+                    - Why this choice
+                    
+                    **Consequences:**
+                    - Positive: Benefits, NFR improvements
+                    - Negative: Trade-offs, technical debt
+                    - Risks: Future issues
+                    
+                    **References:**
+                    - Link to GitHub commits/PRs/issues
+                    
+                    ---
+                    
+                    **ADR Topics:**
+                    - Framework choices, database decisions, architecture patterns
+                    - Security implementations, performance optimizations
+                    - Breaking changes, migrations
+                    
+                    **GitHub Architecture Data:**
+                    %s
+                    
+                    Output ONLY the adr.md markdown content (no delimiters, no wrappers).
+                    """.formatted(focusedContext);
+                    
+        } else if ("api-reference.md".equals(fileName)) {
+            return """
+                    You are a senior technical documentation engineer. Generate comprehensive API Reference documentation for this repository.
+                    
+                    **🚨 CRITICAL: Extract endpoints from the code provided below. PRESERVE EXACT PATHS. DO NOT HALLUCINATE. 🚨**
+                    
+                    **Analysis Instructions:**
+                    1. Find route definitions in code: @app.route("/auth/login"), @app.get("/posts"), @PostMapping("/users")
+                    2. Extract HTTP method and path EXACTLY as written
+                    3. Extract parameters from function signatures
+                    4. Document ONLY endpoints you can SEE in code
+                    
+                    **Structure:**
+                    
+                    # [API Name] API Reference
+                    
+                    ## Authentication
+                    - Type: Bearer JWT / API Key / OAuth2
+                    - How to obtain
+                    - Example
+                    
+                    ## Base URL
+                    - Production: https://...
+                    - Development: http://localhost:...
+                    
+                    ## Endpoints
+                    
+                    For EACH endpoint found in code:
+                    
+                    ### [HTTP METHOD] [EXACT PATH FROM CODE]
+                    
+                    **Description:** What this endpoint does
+                    
+                    **Authentication Required:** Yes/No
+                    
+                    **Parameters:**
+                    | Name | Type | Location | Required | Description | Example |
+                    |------|------|----------|----------|-------------|---------|
+                    | param1 | string | path | Yes | ... | ... |
+                    
+                    **Request Body:** (if POST/PUT/PATCH)
+                    ```json
+                    {
+                      "field": "value"
+                    }
+                    ```
+                    
+                    **Success Response (200 OK):**
+                    ```json
+                    {
+                      "id": 1,
+                      "status": "success"
+                    }
+                    ```
+                    
+                    **Error Responses:**
+                    - 400 Bad Request: Invalid parameters
+                    - 401 Unauthorized: Missing/invalid authentication
+                    - 404 Not Found: Resource not found
+                    
+                    **Example:**
+                    ```bash
+                    curl -X GET "https://api.example.com/endpoint" \\
+                      -H "Authorization: Bearer TOKEN"
+                    ```
+                    
+                    ---
+                    
+                    **API Routes & Code:**
+                    %s
+                    
+                    Output ONLY the api-reference.md markdown content (no delimiters, no wrappers).
+                    """.formatted(focusedContext);
+        }
+        
+        return "Generate documentation for " + fileName + " based on:\n\n" + focusedContext;
+    }
+
     // ─── Gemini Legacy Defaults
     // ───────────────────────────────────────────────────
 
@@ -1159,9 +1578,9 @@ public class LivingWikiService {
                 Files to generate:
 
                 1. README.md — Comprehensive project documentation with these REQUIRED sections:
-                
+
                    **🚨 ANALYZE CODE CHUNKS BELOW - Extract tech stack from imports/decorators, features from API endpoints. DO NOT HALLUCINATE.**
-                
+
                    # Project Title
                    - Clear, descriptive title
                    - 1-2 sentence description of purpose and problem solved
@@ -1223,21 +1642,21 @@ public class LivingWikiService {
                    Include ADRs for: framework choice, database decisions, architecture patterns, security implementations, performance optimizations, breaking changes
                    Base on GitHub commits/PRs/issues with keywords: refactor, breaking change, migration, architecture, decision
                    If no GitHub data, infer from code structure only. DO NOT hallucinate.
-                
+
                 3. api-reference.md — Complete API Reference
                    **🚨 ANALYZE "API ROUTES & ENDPOINTS" CODE CHUNKS - Extract actual endpoints. PRESERVE EXACT PATHS. DO NOT HALLUCINATE.**
-                   
+
                    **CRITICAL:**
                    - Extract endpoints from code: @app.route("/auth/login") → POST /auth/login
                    - Use EXACT paths from code: /get_posts NOT /posts, /connect/accept/{id} NOT /connections/{id}
                    - Extract params from code: def login(username: str, password: str) → Parameters: username, password
-                   
+
                    Structure:
                    # [API Name] API Reference
                    ## Authentication (describe: Bearer JWT, API key, OAuth2, etc.)
                    ## Base URL (production and development URLs)
                    ## Endpoints
-                   
+
                    For EACH endpoint found in code chunks:
                    ### [HTTP Method] [Path]
                    - **Description:** What the endpoint does
@@ -1250,17 +1669,17 @@ public class LivingWikiService {
                    - **Response Schema:** Table describing response fields
                    - **Error Responses:** 400, 401, 404, 500 with JSON examples
                    - **Code Examples:** cURL, Python (requests library), JavaScript (Node.js fetch and Axios)
-                   
+
                    CRITICAL Analysis Process:
                    1. Read "API ROUTES & ENDPOINTS" section below carefully
                    2. Extract routes from decorators/annotations: @app.route, @app.get, @PostMapping, router.post
                    3. Extract parameters from function signatures
                    4. Document ONLY what you SEE in code chunks - NO invention
                    5. Test files (working examples of API usage)
-                   
+
                    Quality: Use actual paths, parameters, response types from code. Include ALL endpoints.
                    Group by resource/controller. NO hallucination - use "To be documented" if details missing.
-                
+
                 4. architecture.md — System design based on actual implementation
                 5. documentation-health.md — Health score (X out of 100) based on code analysis
                 6. api-descriptions.json — Schema-compliant endpoint JSON from actual controllers
