@@ -125,6 +125,13 @@ public class LivingWikiService {
                 // Stage 2: COMPREHENSIVE API ROUTE/ENDPOINT DISCOVERY
                 // Search for framework-specific route patterns with HIGHER chunk limits
                 String[] apiQueries = {
+                        // CRITICAL: Router prefix registration (MUST come first for context)
+                        "APIRouter prefix include_router app.include_router FastAPI",
+                        "Blueprint url_prefix register_blueprint Flask",
+                        "app.use router Express middleware mounting",
+                        "@RequestMapping Controller base path prefix Spring",
+                        "main.py app.py __init__.py router registration",
+
                         // Python frameworks
                         "@app.route decorator Flask blueprint endpoint",
                         "FastAPI @app.get @app.post @app.put @app.delete APIRouter",
@@ -173,14 +180,19 @@ public class LivingWikiService {
                                 seenChunks.add(chunkId);
                                 String chunkText = chunk.getChunkText();
 
-                                // Check if this looks like a route/controller file
+                                // Check if this looks like a route/controller file OR main entry point
                                 String filePath = chunk.getFilePath().toLowerCase();
                                 boolean isRouteFile = filePath.contains("route") || filePath.contains("controller")
                                         || filePath.contains("endpoint") || filePath.contains("api")
                                         || filePath.contains("view") || filePath.contains("handler");
+                                
+                                // Main files often contain router registration - preserve them fully
+                                boolean isMainFile = filePath.contains("main.py") || filePath.contains("app.py")
+                                        || filePath.contains("__init__.py") || filePath.contains("index.ts")
+                                        || filePath.contains("server.ts") || filePath.contains("application.java");
 
-                                // Don't truncate route files as aggressively
-                                int maxLen = isRouteFile ? maxRouteChunkLength : maxChunkLength;
+                                // Don't truncate route files or main files aggressively
+                                int maxLen = (isRouteFile || isMainFile) ? maxRouteChunkLength : maxChunkLength;
                                 if (chunkText.length() > maxLen) {
                                     chunkText = chunkText.substring(0, maxLen) + "\n... (truncated)";
                                 }
@@ -509,8 +521,8 @@ public class LivingWikiService {
                 return generateSingleFileDirect("api-reference.md", apiContext, provider);
             }
 
-            // Calculate batch size (aim for ~12KB per batch = ~3000 tokens)
-            int maxCharsPerBatch = 12000;
+            // Calculate batch size (aim for ~8KB per batch = ~2000 tokens, stays well under 6K TPM)
+            int maxCharsPerBatch = 8000;
             List<List<String>> batches = createBatches(chunks, maxCharsPerBatch);
             log.info("[LivingWiki] Created {} batches for API reference generation", batches.size());
 
@@ -541,11 +553,13 @@ public class LivingWikiService {
                 }
 
                 // Delay between batches to respect rate limits
-                // Groq free tier: 6000 TPM, batches use ~3000 tokens, need ~30s between requests
+                // Groq free tier: 6000 TPM with sliding 1-minute window
+                // Previous batches (README, ADR) may still be in window
+                // 60s delay ensures previous tokens expire from sliding window
                 if (i < batches.size() - 1) {
                     try {
-                        log.info("[LivingWiki] Waiting 25s before next batch to respect rate limits...");
-                        Thread.sleep(25000); // 25 seconds
+                        log.info("[LivingWiki] Waiting 60s before next batch to respect rate limits (sliding window)...");
+                        Thread.sleep(60000); // 60 seconds
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
@@ -599,8 +613,8 @@ public class LivingWikiService {
                 return generateSingleFileDirect("README.md", truncated, provider);
             }
 
-            // Calculate batch size (aim for ~12KB per batch)
-            int maxCharsPerBatch = 12000;
+            // Calculate batch size (aim for ~8KB per batch = ~2000 tokens)
+            int maxCharsPerBatch = 8000;
             List<List<String>> batches = createBatches(chunks, maxCharsPerBatch);
             log.info("[LivingWiki] Created {} batches for README generation", batches.size());
 
@@ -637,8 +651,8 @@ public class LivingWikiService {
                 // Delay between batches
                 if (i < Math.min(batches.size(), 2) - 1) {
                     try {
-                        log.info("[LivingWiki] Waiting 25s before next batch to respect rate limits...");
-                        Thread.sleep(25000);
+                        log.info("[LivingWiki] Waiting 60s before next batch to respect rate limits (sliding window)...");
+                        Thread.sleep(60000); // 60 seconds for full TPM window reset
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
@@ -726,15 +740,42 @@ public class LivingWikiService {
                 Output markdown (no delimiters). Extract factual information only.
                 """.formatted(batchNum, batchContext);
 
-        try {
-            if (provider != null) {
-                return cleanBatchResponse(callAiForBatch(prompt, provider));
+        // Retry logic for rate limit errors
+        int maxRetries = 3;
+        int retryDelay = 30000; // Start with 30 seconds
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                if (provider != null) {
+                    String response = callAiForBatch(prompt, provider);
+                    if (response != null && !response.isBlank()) {
+                        return cleanBatchResponse(response);
+                    }
+                }
+                if (geminiApiKey != null && !geminiApiKey.isBlank()) {
+                    String response = callGeminiForBatch(prompt);
+                    if (response != null && !response.isBlank()) {
+                        return cleanBatchResponse(response);
+                    }
+                }
+            } catch (Exception e) {
+                String errorMsg = e.getMessage();
+                boolean isRateLimit = errorMsg != null && errorMsg.contains("429");
+                
+                if (isRateLimit && attempt < maxRetries) {
+                    log.warn("[LivingWiki] README batch {} rate limited (attempt {}/{}). Retrying in {}s...", 
+                        batchNum, attempt, maxRetries, retryDelay / 1000);
+                    try {
+                        Thread.sleep(retryDelay);
+                        retryDelay *= 2; // Exponential backoff
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                } else {
+                    log.warn("[LivingWiki] README batch {} failed: {}", batchNum, e.getMessage());
+                    break;
+                }
             }
-            if (geminiApiKey != null && !geminiApiKey.isBlank()) {
-                return cleanBatchResponse(callGeminiForBatch(prompt));
-            }
-        } catch (Exception e) {
-            log.warn("[LivingWiki] README batch {} failed: {}", batchNum, e.getMessage());
         }
         return null;
     }
@@ -790,29 +831,50 @@ public class LivingWikiService {
     }
 
     /**
-     * Generate documentation for a single batch of API endpoints.
+     * Generate documentation for a single batch of API endpoints with retry logic.
      */
     private String generateApiBatchDocumentation(String batchContext, Map<String, Object> provider, 
                                                    int batchNum, int totalBatches) {
         String prompt = buildApiBatchPrompt(batchContext, batchNum, totalBatches);
 
-        try {
-            if (provider != null) {
-                String response = callAiForBatch(prompt, provider);
-                if (response != null && !response.isBlank()) {
-                    return cleanBatchResponse(response);
-                }
-            }
+        // Retry logic for rate limit errors
+        int maxRetries = 3;
+        int retryDelay = 30000; // Start with 30 seconds
 
-            // Fallback to Gemini
-            if (geminiApiKey != null && !geminiApiKey.isBlank()) {
-                String response = callGeminiForBatch(prompt);
-                if (response != null && !response.isBlank()) {
-                    return cleanBatchResponse(response);
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                if (provider != null) {
+                    String response = callAiForBatch(prompt, provider);
+                    if (response != null && !response.isBlank()) {
+                        return cleanBatchResponse(response);
+                    }
+                }
+
+                // Fallback to Gemini
+                if (geminiApiKey != null && !geminiApiKey.isBlank()) {
+                    String response = callGeminiForBatch(prompt);
+                    if (response != null && !response.isBlank()) {
+                        return cleanBatchResponse(response);
+                    }
+                }
+            } catch (Exception e) {
+                String errorMsg = e.getMessage();
+                boolean isRateLimit = errorMsg != null && errorMsg.contains("429");
+                
+                if (isRateLimit && attempt < maxRetries) {
+                    log.warn("[LivingWiki] Batch {}/{} rate limited (attempt {}/{}). Retrying in {}s...", 
+                        batchNum, totalBatches, attempt, maxRetries, retryDelay / 1000);
+                    try {
+                        Thread.sleep(retryDelay);
+                        retryDelay *= 2; // Exponential backoff
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                } else {
+                    log.warn("[LivingWiki] Batch {}/{} failed: {}", batchNum, totalBatches, e.getMessage());
+                    break;
                 }
             }
-        } catch (Exception e) {
-            log.warn("[LivingWiki] Batch {}/{} failed: {}", batchNum, totalBatches, e.getMessage());
         }
 
         return null;
@@ -825,11 +887,26 @@ public class LivingWikiService {
         return """
                 You are documenting API endpoints (batch %d of %d).
                 
-                **CRITICAL: Extract endpoints from code. Use EXACT paths. DO NOT hallucinate.**
+                **CRITICAL INSTRUCTIONS - READ CAREFULLY:**
+                
+                1. **Router Prefix Detection (MOST IMPORTANT):**
+                   - Look for router prefix declarations: `APIRouter(prefix="/auth")`, `Blueprint(url_prefix="/api")`, `@RequestMapping("/users")`
+                   - Look for router registration: `app.include_router(router, prefix="/auth")`, `app.register_blueprint(bp, url_prefix="/api")`
+                   - COMBINE router prefix + endpoint path to form complete URL
+                   - Example: If router has `prefix="/auth"` and endpoint is `@router.post("/login")`, final path is `/auth/login` NOT `/login`
+                
+                2. **Extract Real Endpoints:**
+                   - Use EXACT paths from code. DO NOT invent or hallucinate endpoints.
+                   - Parse decorators: `@app.get("/users")`, `@router.post("/login")`, `@DeleteMapping("/posts/{id}")`
+                   - Include path parameters: `{id}`, `{username}`, `{post_id}` exactly as shown
+                
+                3. **HTTP Methods:**
+                   - GET requests: DO NOT include request body
+                   - POST/PUT/PATCH: Include request body if you see it in code
                 
                 For EACH endpoint in this batch:
                 
-                ### [HTTP METHOD] [EXACT PATH]
+                ### [HTTP METHOD] [COMPLETE PATH WITH PREFIX]
                 
                 **Description:** What this endpoint does
                 
@@ -838,7 +915,7 @@ public class LivingWikiService {
                 **Parameters:**
                 | Name | Type | Location | Required | Description |
                 |------|------|----------|----------|-------------|
-                | ... | ... | ... | ... | ... |
+                | ... | ... | Path/Query/Header | ... | ... |
                 
                 **Request Body:** (if POST/PUT/PATCH)
                 ```json
