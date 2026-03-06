@@ -94,13 +94,15 @@ public class LivingWikiService {
                 int maxChunkLength = 500; // Truncate long chunks
 
                 for (String query : queries) {
-                    if (totalChunks >= maxTotalChunks) break; // Stop if limit reached
-                    
+                    if (totalChunks >= maxTotalChunks)
+                        break; // Stop if limit reached
+
                     try {
                         List<VectorEmbedding> chunks = embeddingService.semanticSearch(userId, repoUrl, query, 2);
                         for (VectorEmbedding chunk : chunks) {
-                            if (totalChunks >= maxTotalChunks) break;
-                            
+                            if (totalChunks >= maxTotalChunks)
+                                break;
+
                             String chunkId = chunk.getFilePath() + ":" + chunk.getChunkIndex();
                             if (!seenChunks.contains(chunkId)) {
                                 seenChunks.add(chunkId);
@@ -120,7 +122,7 @@ public class LivingWikiService {
                     }
                 }
 
-                log.info("[LivingWiki] Retrieved {} unique code chunks (max {}) for semantic context", 
+                log.info("[LivingWiki] Retrieved {} unique code chunks (max {}) for semantic context",
                         totalChunks, maxTotalChunks);
             } catch (Exception e) {
                 log.warn("[LivingWiki] Could not retrieve semantic context: {}", e.getMessage());
@@ -160,22 +162,22 @@ public class LivingWikiService {
         if (githubToken != null && !githubToken.isBlank()) {
             try {
                 log.info("[LivingWiki] Fetching architecture context from GitHub");
-                GitHubApiService.ArchitectureContext archContext = 
-                    githubApiService.fetchArchitectureContext(repoUrl, githubToken);
+                GitHubApiService.ArchitectureContext archContext = githubApiService.fetchArchitectureContext(repoUrl,
+                        githubToken);
 
                 if (!archContext.isEmpty()) {
                     context.append("\n─── GitHub Architecture Decision Records ───\n\n");
-                    
+
                     // Add architectural commits
                     if (!archContext.getCommits().isEmpty()) {
                         context.append("## Architectural Commits\n");
                         context.append("Recent commits with architectural significance:\n\n");
                         archContext.getCommits().stream().limit(10).forEach(commit -> {
                             context.append(String.format("- **%s** (%s)\n",
-                                commit.getMessage().split("\n")[0], // First line only
-                                commit.getDate() != null ? commit.getDate().substring(0, 10) : "unknown"));
+                                    commit.getMessage().split("\n")[0], // First line only
+                                    commit.getDate() != null ? commit.getDate().substring(0, 10) : "unknown"));
                             context.append(String.format("  Author: %s | URL: %s\n",
-                                commit.getAuthor(), commit.getUrl()));
+                                    commit.getAuthor(), commit.getUrl()));
                         });
                         context.append("\n");
                     }
@@ -186,15 +188,15 @@ public class LivingWikiService {
                         context.append("Pull requests discussing design decisions:\n\n");
                         archContext.getPullRequests().stream().limit(8).forEach(pr -> {
                             context.append(String.format("- **PR #%d: %s** [%s]\n",
-                                pr.getNumber(), pr.getTitle(), pr.getState()));
+                                    pr.getNumber(), pr.getTitle(), pr.getState()));
                             if (!pr.getLabels().isEmpty()) {
                                 context.append(String.format("  Labels: %s\n",
-                                    String.join(", ", pr.getLabels())));
+                                        String.join(", ", pr.getLabels())));
                             }
                             if (pr.getBody() != null && !pr.getBody().isBlank()) {
-                                String description = pr.getBody().length() > 150 
-                                    ? pr.getBody().substring(0, 150) + "..." 
-                                    : pr.getBody();
+                                String description = pr.getBody().length() > 150
+                                        ? pr.getBody().substring(0, 150) + "..."
+                                        : pr.getBody();
                                 context.append(String.format("  Description: %s\n", description));
                             }
                             context.append(String.format("  URL: %s\n", pr.getUrl()));
@@ -208,15 +210,15 @@ public class LivingWikiService {
                         context.append("Issues discussing architecture and design:\n\n");
                         archContext.getIssues().stream().limit(8).forEach(issue -> {
                             context.append(String.format("- **Issue #%d: %s** [%s]\n",
-                                issue.getNumber(), issue.getTitle(), issue.getState()));
+                                    issue.getNumber(), issue.getTitle(), issue.getState()));
                             if (!issue.getLabels().isEmpty()) {
                                 context.append(String.format("  Labels: %s\n",
-                                    String.join(", ", issue.getLabels())));
+                                        String.join(", ", issue.getLabels())));
                             }
                             if (issue.getBody() != null && !issue.getBody().isBlank()) {
                                 String description = issue.getBody().length() > 150
-                                    ? issue.getBody().substring(0, 150) + "..."
-                                    : issue.getBody();
+                                        ? issue.getBody().substring(0, 150) + "..."
+                                        : issue.getBody();
                                 context.append(String.format("  Description: %s\n", description));
                             }
                             context.append(String.format("  URL: %s\n", issue.getUrl()));
@@ -225,9 +227,9 @@ public class LivingWikiService {
                     }
 
                     log.info("[LivingWiki] Added GitHub architecture context ({} commits, {} PRs, {} issues)",
-                        archContext.getCommits().size(), 
-                        archContext.getPullRequests().size(),
-                        archContext.getIssues().size());
+                            archContext.getCommits().size(),
+                            archContext.getPullRequests().size(),
+                            archContext.getIssues().size());
                 }
 
             } catch (Exception e) {
@@ -458,89 +460,89 @@ public class LivingWikiService {
                 <file content here>
 
                 Files to generate:
-                
+
                 1. README.md — Comprehensive project documentation with the following REQUIRED sections:
                    # Project Title
                    - Clear, descriptive title as H1 header
                    - 1-2 sentence description of what the project does, its purpose, and problem it solves
-                   
+
                    ## Table of Contents
                    - Anchor links to all major sections for quick navigation
-                   
+
                    ## Features
                    - Bulleted list of key features and functionality
                    - Highlight what makes this project stand out
-                   
+
                    ## Tech Stack
                    - List technologies with versions (e.g., Java 21, Spring Boot 3.2.1, React 18)
                    - Include frameworks, libraries, and tools used
-                   
+
                    ## Installation and Setup
                    ### Prerequisites
                    - Required software, libraries, OS versions
                    - System requirements
-                   
+
                    ### Installation Steps
                    - Step-by-step commands to clone repo
                    - Dependency installation commands (npm install, mvn install, etc.)
-                   
+
                    ### Configuration
                    - Environment variables needed
                    - Configuration files to set up
                    - Database setup if applicable
-                   
+
                    ## Usage Examples
                    - Clear instructions with code snippets
                    - Command-line examples
                    - Expected output descriptions
-                   
+
                    ## Project Structure
                    - Brief overview of main directories and their purpose
                    - ASCII tree of key folders (do NOT hallucinate, use actual structure provided)
-                   
+
                    ## Contributing
                    - Guidelines for bug reports
                    - Pull request process
                    - Coding standards
-                   
+
                    ## License
                    - Clear license statement (e.g., MIT, Apache 2.0)
-                   
+
                    ## Credits and Acknowledgments
                    - Contributors and team members
                    - Third-party libraries and resources used
-                   
+
                    ## Support
                    - How to get help (issue tracker, discussions)
                    - Contact information if applicable
-                   
+
                    ## Project Status
                    - Current development stage (active, maintenance, etc.)
                    - Roadmap of planned features (if applicable)
-                   
+
                    CRITICAL: Base ALL content on the actual repository structure provided below. DO NOT invent features, dependencies, or technologies that aren't evident in the structure. If information is missing, state "To be documented" rather than hallucinating.
-                
+
                 2. adr.md — Architecture Decision Records (ADRs)
-                   
+
                    **CRITICAL: Use the GitHub Architecture Decision Records section below (if provided) to create factual ADRs based on actual commits, pull requests, and issues.**
-                   
+
                    Document at least 5-10 key architectural decisions using this format for EACH decision:
-                   
+
                    ### ADR-###: [Decision Title]
-                   
+
                    **Status:** Accepted | Proposed | Deprecated | Superseded
-                   
+
                    **Context:**
                    - What is the situation/problem requiring a decision?
                    - What constraints exist (technical, business, time)?
                    - When was this decision made? (Use GitHub commit/PR dates if available)
                    - Who proposed it? (Use GitHub authors if available)
-                   
+
                    **Decision:**
                    - What was decided? Be specific and concrete.
                    - What alternatives were considered?
                    - Why was this chosen over alternatives?
-                   
+
                    **Consequences:**
                    - **Positive:**
                      - Benefits gained
@@ -552,13 +554,13 @@ public class LivingWikiService {
                    - **Risks:**
                      - Potential future issues
                      - Migration challenges
-                   
+
                    **References:**
                    - Link to GitHub commits, PRs, or issues if mentioned in the GitHub ADR section
                    - Link to documentation or RFCs
-                   
+
                    ---
-                   
+
                    **When to create an ADR (include these if evident in GitHub history):**
                    1. Multiple technical options were considered
                    2. Decision impacts future development (breaking changes, migrations)
@@ -568,7 +570,7 @@ public class LivingWikiService {
                    6. Database schema changes or migration
                    7. API design or breaking changes
                    8. Architecture pattern adoption (microservices, event-driven, etc.)
-                   
+
                    **Example ADR Topics to Look For:**
                    - Framework choice (e.g., "Why React over Vue", "Why Spring Boot over Express")
                    - Database decisions (e.g., "Migration from MySQL to PostgreSQL")
@@ -576,24 +578,276 @@ public class LivingWikiService {
                    - Security implementations (e.g., "OAuth2 vs JWT authentication")
                    - Performance optimizations (e.g., "Adding Redis cache layer")
                    - Breaking changes (e.g., "API versioning strategy", "Refactoring to REST from GraphQL")
-                   
+
                    IMPORTANT: Base ADRs on actual evidence from:
                    - GitHub commits with keywords like "refactor", "breaking change", "migration", "architecture"
                    - GitHub PRs discussing design decisions
                    - GitHub issues about architectural choices
                    - Code structure patterns visible in the repository
-                   
+
                    If no GitHub data is available, infer decisions from code structure only. DO NOT hallucinate decisions.
-                
-                
-                3. api-reference.md — API documentation. For endpoints/services evident in the code, include base URL, auth, parameter tables, example requests/responses, and error codes.
-                
-                4. architecture.md — System design documentation. Describe design patterns visible in the code, state management, security model, and data flow based on actual implementation.
-                
+
+
+                3. api-reference.md — Complete API Reference Documentation
+                   
+                   **CRITICAL: Analyze actual source code files (controllers, routes, handlers) to extract factual API details. This is the PRIMARY SOURCE OF TRUTH for API documentation.**
+                   
+                   **Structure Requirements:**
+                   
+                   # [API Name] API Reference
+                   
+                   > Brief 1-2 sentence description of the API's purpose and primary use cases.
+                   
+                   ## Authentication
+                   
+                   Describe authentication mechanism (Bearer token, API key, OAuth2, etc.):
+                   - **Type**: Bearer JWT / API Key / OAuth2
+                   - **Header Format**: `Authorization: Bearer <token>`
+                   - **How to obtain**: Login endpoint or OAuth flow
+                   - **Example**:
+                     ```bash
+                     curl -H "Authorization: Bearer eyJhbGc..." https://api.example.com/endpoint
+                     ```
+                   
+                   ## Base URL
+                   
+                   ```
+                   Production: https://api.example.com
+                   Development: http://localhost:8080/api
+                   ```
+                   
+                   ## Endpoints
+                   
+                   **For EACH endpoint found in controllers/routes, use this exact format:**
+                   
+                   ### [HTTP Method] [Endpoint Path]
+                   
+                   **Description:** Clear 1-2 sentence explanation of what this endpoint does.
+                   
+                   **HTTP Method:** GET | POST | PUT | PATCH | DELETE
+                   
+                   **Endpoint URL:** `/api/resource/{id}`
+                   
+                   **Authentication Required:** Yes | No
+                   
+                   **Parameters:**
+                   
+                   | Parameter | Type | Location | Required | Description | Example |
+                   |-----------|------|----------|----------|-------------|---------|
+                   | id | integer | path | Yes | Unique identifier | 123 |
+                   | name | string | query | No | Filter by name | "John" |
+                   | data | object | body | Yes | Request payload | See below |
+                   
+                   **Request Headers:**
+                   
+                   | Header | Required | Description | Example |
+                   |--------|----------|-------------|---------|
+                   | Authorization | Yes | Bearer JWT token | Bearer eyJhbGc... |
+                   | Content-Type | Yes | Request content type | application/json |
+                   
+                   **Request Body Example:**
+                   
+                   ```json
+                   {
+                     "name": "Example Resource",
+                     "type": "sample",
+                     "metadata": {
+                       "category": "test",
+                       "priority": 1
+                     }
+                   }
+                   ```
+                   
+                   **Request Body Schema:**
+                   
+                   | Field | Type | Required | Description |
+                   |-------|------|----------|-------------|
+                   | name | string | Yes | Resource name (max 100 chars) |
+                   | type | string | Yes | Resource type (enum: sample, production) |
+                   | metadata | object | No | Additional metadata |
+                   | metadata.category | string | No | Category tag |
+                   | metadata.priority | integer | No | Priority level (1-5) |
+                   
+                   **Success Response (200 OK):**
+                   
+                   ```json
+                   {
+                     "id": 123,
+                     "name": "Example Resource",
+                     "type": "sample",
+                     "created_at": "2024-03-06T10:30:00Z",
+                     "updated_at": "2024-03-06T10:30:00Z"
+                   }
+                   ```
+                   
+                   **Response Schema:**
+                   
+                   | Field | Type | Description |
+                   |-------|------|-------------|
+                   | id | integer | Unique identifier |
+                   | name | string | Resource name |
+                   | type | string | Resource type |
+                   | created_at | string (ISO 8601) | Creation timestamp |
+                   | updated_at | string (ISO 8601) | Last update timestamp |
+                   
+                   **Error Responses:**
+                   
+                   **400 Bad Request:**
+                   ```json
+                   {
+                     "error": "Validation failed",
+                     "message": "Invalid request body",
+                     "details": {
+                       "field": "name",
+                       "issue": "Name cannot be empty"
+                     }
+                   }
+                   ```
+                   
+                   **401 Unauthorized:**
+                   ```json
+                   {
+                     "error": "Authentication required",
+                     "message": "Missing or invalid authorization token"
+                   }
+                   ```
+                   
+                   **404 Not Found:**
+                   ```json
+                   {
+                     "error": "Resource not found",
+                     "message": "Resource with ID 123 does not exist"
+                   }
+                   ```
+                   
+                   **500 Internal Server Error:**
+                   ```json
+                   {
+                     "error": "Internal server error",
+                     "message": "An unexpected error occurred"
+                   }
+                   ```
+                   
+                   **Code Examples:**
+                   
+                   **cURL:**
+                   ```bash
+                   curl -X POST https://api.example.com/api/resource \\
+                     -H "Authorization: Bearer YOUR_TOKEN" \\
+                     -H "Content-Type: application/json" \\
+                     -d '{
+                       "name": "Example Resource",
+                       "type": "sample"
+                     }'
+                   ```
+                   
+                   **Python (requests):**
+                   ```python
+                   import requests
+                   
+                   url = "https://api.example.com/api/resource"
+                   headers = {
+                       "Authorization": "Bearer YOUR_TOKEN",
+                       "Content-Type": "application/json"
+                   }
+                   data = {
+                       "name": "Example Resource",
+                       "type": "sample"
+                   }
+                   
+                   response = requests.post(url, json=data, headers=headers)
+                   print(response.json())
+                   ```
+                   
+                   **JavaScript (Node.js with fetch):**
+                   ```javascript
+                   const fetch = require('node-fetch');
+                   
+                   const url = 'https://api.example.com/api/resource';
+                   const options = {
+                     method: 'POST',
+                     headers: {
+                       'Authorization': 'Bearer YOUR_TOKEN',
+                       'Content-Type': 'application/json'
+                     },
+                     body: JSON.stringify({
+                       name: 'Example Resource',
+                       type: 'sample'
+                     })
+                   };
+                   
+                   fetch(url, options)
+                     .then(res => res.json())
+                     .then(data => console.log(data))
+                     .catch(err => console.error(err));
+                   ```
+                   
+                   **JavaScript (Axios):**
+                   ```javascript
+                   const axios = require('axios');
+                   
+                   const response = await axios.post(
+                     'https://api.example.com/api/resource',
+                     {
+                       name: 'Example Resource',
+                       type: 'sample'
+                     },
+                     {
+                       headers: {
+                         'Authorization': 'Bearer YOUR_TOKEN',
+                         'Content-Type': 'application/json'
+                       }
+                     }
+                   );
+                   
+                   console.log(response.data);
+                   ```
+                   
+                   ---
+                   
+                   **CRITICAL ANALYSIS REQUIREMENTS:**
+                   
+                   To generate accurate API documentation, analyze these files in order of priority:
+                   
+                   1. **API Specification Files** (PRIMARY SOURCE):
+                      - openapi.yaml, swagger.json, api-spec.yaml
+                      - These are the definitive source of truth for API contracts
+                   
+                   2. **Controller/Route Files** (SECONDARY SOURCE):
+                      - @RestController, @RequestMapping, @GetMapping, @PostMapping annotations (Spring Boot)
+                      - Express routes, FastAPI decorators, Django views
+                      - Extract: HTTP method, path, parameters, request/response types
+                   
+                   3. **Type Definitions/Schemas**:
+                      - TypeScript interfaces, Java DTOs, Python dataclasses
+                      - Database models, ORM schemas
+                      - Extract: field names, types, required/optional, constraints
+                   
+                   4. **Code Comments/Docstrings**:
+                      - JavaDoc, JSDoc, Python docstrings, Swagger annotations
+                      - Extract: endpoint descriptions, parameter explanations
+                   
+                   5. **Test Files**:
+                      - API integration tests, request/response examples
+                      - Extract: working examples of API usage, edge cases, error handling
+                   
+                   **Quality Standards:**
+                   - ✅ Use actual endpoint paths from code (@RequestMapping values)
+                   - ✅ Use actual parameter names from method signatures
+                   - ✅ Use actual response types from return statements
+                   - ✅ Include ALL endpoints found in controllers (do not skip any)
+                   - ✅ Group endpoints by resource/controller
+                   - ✅ Consistent formatting across all endpoints
+                   - ✅ Include error codes found in exception handlers
+                   - ❌ DO NOT hallucinate endpoints that don't exist
+                   - ❌ DO NOT invent parameter names or types
+                   - ❌ DO NOT create fake example responses
+                   
+                   If endpoint details are missing from code, state "To be documented" rather than guessing.
                 5. documentation-health.md — Health report analyzing coverage, clarity, and consistency. Provide a health score (X out of 100) based on actual code analysis.
-                
+
                 6. api-descriptions.json — Schema-compliant JSON of all endpoints found in controllers/routes.
-                
+
                 7. doc_snapshot.json — Project statistics in JSON format:
                    {
                      "project_stats": {
@@ -607,16 +861,16 @@ public class LivingWikiService {
                      },
                      "health_tier": "green|yellow|red"
                    }
-                
+
                 8. tree.txt — Professional ASCII tree of the repository structure (use actual structure, do not hallucinate).
-                
+
                 9. tree.json — Structured hierarchical map:
                    {
                      "name": "root",
                      "type": "directory",
                      "children": [...]
                    }
-                
+
                 10. architecture-graph.json — Interactive graph visualization based on actual module relationships:
                     {
                       "nodes": [{"id": "module_name", "label": "Module Name", "type": "module"}],
@@ -770,21 +1024,21 @@ public class LivingWikiService {
                 <file content here>
 
                 Files to generate:
-                
+
                 1. README.md — Comprehensive project documentation with these REQUIRED sections:
                    # Project Title
                    - Clear, descriptive title
                    - 1-2 sentence description of purpose and problem solved
-                   
+
                    ## Table of Contents
                    - Anchor links to all major sections
-                   
+
                    ## Features
                    - Bulleted list of key features
-                   
+
                    ## Tech Stack
                    - Technologies with versions (e.g., Java 21, Spring Boot 3.2.1)
-                   
+
                    ## Installation and Setup
                    ### Prerequisites
                    - Required software and versions
@@ -792,33 +1046,33 @@ public class LivingWikiService {
                    - Step-by-step clone and dependency installation
                    ### Configuration
                    - Environment variables and config files
-                   
+
                    ## Usage Examples
                    - Code snippets and command examples
-                   
+
                    ## Project Structure
                    - Overview of main directories (use actual structure provided, DO NOT hallucinate)
-                   
+
                    ## Contributing
                    - Guidelines for contributions
-                   
+
                    ## License
                    - License statement
-                   
+
                    ## Credits and Acknowledgments
                    - Contributors and third-party libraries
-                   
+
                    ## Support
                    - How to get help
-                   
+
                    ## Project Status
                    - Development stage and roadmap
-                   
+
                    CRITICAL: Base content on actual repository structure. DO NOT invent features or technologies. Use "To be documented" if info is missing.
-                
+
                 2. adr.md — Architecture Decision Records
                    **USE GitHub Architecture Decision Records section (if provided) to create factual ADRs from actual commits/PRs/issues.**
-                   
+
                    Format each ADR as:
                    ### ADR-###: [Decision Title]
                    **Status:** Accepted|Proposed|Deprecated
@@ -829,12 +1083,43 @@ public class LivingWikiService {
                    - Negative: Trade-offs, technical debt, maintenance overhead
                    - Risks: Future issues, migration challenges
                    **References:** Link to GitHub commits/PRs/issues if mentioned
-                   
+
                    Include ADRs for: framework choice, database decisions, architecture patterns, security implementations, performance optimizations, breaking changes
                    Base on GitHub commits/PRs/issues with keywords: refactor, breaking change, migration, architecture, decision
                    If no GitHub data, infer from code structure only. DO NOT hallucinate.
+                
+                3. api-reference.md — Complete API Reference
+                   **Analyze controllers/routes files to extract factual endpoint details.**
                    
-                3. api-reference.md — API documentation for endpoints found in code
+                   Structure:
+                   # [API Name] API Reference
+                   ## Authentication (describe: Bearer JWT, API key, OAuth2, etc.)
+                   ## Base URL (production and development URLs)
+                   ## Endpoints
+                   
+                   For EACH endpoint found in code:
+                   ### [HTTP Method] [Path]
+                   - **Description:** What the endpoint does
+                   - **Authentication Required:** Yes/No
+                   - **Parameters:** Table with columns: Name | Type | Location | Required | Description | Example
+                   - **Request Headers:** Table with columns: Header | Required | Description
+                   - **Request Body:** JSON example with actual field names from code
+                   - **Request Body Schema:** Table with field details
+                   - **Success Response (200):** JSON example with actual response structure
+                   - **Response Schema:** Table describing response fields
+                   - **Error Responses:** 400, 401, 404, 500 with JSON examples
+                   - **Code Examples:** cURL, Python (requests library), JavaScript (Node.js fetch and Axios)
+                   
+                   CRITICAL Analysis Order:
+                   1. API spec files (openapi.yaml, swagger.json) - PRIMARY SOURCE
+                   2. Controllers (@RestController, @RequestMapping, routes, handlers)
+                   3. Type definitions (DTOs, interfaces, models, schemas)
+                   4. Code comments (JavaDoc, Swagger annotations, docstrings)
+                   5. Test files (working examples of API usage)
+                   
+                   Quality: Use actual paths, parameters, response types from code. Include ALL endpoints.
+                   Group by resource/controller. NO hallucination - use "To be documented" if details missing.
+                
                 4. architecture.md — System design based on actual implementation
                 5. documentation-health.md — Health score (X out of 100) based on code analysis
                 6. api-descriptions.json — Schema-compliant endpoint JSON from actual controllers
@@ -908,13 +1193,13 @@ public class LivingWikiService {
     private String generateFallbackWiki(String repoUrl, Map<String, Set<String>> modules, int totalFiles,
             int totalDeps) {
         StringBuilder wiki = new StringBuilder();
-        
+
         // Extract project name from repo URL
         String projectName = repoUrl.substring(repoUrl.lastIndexOf('/') + 1).replace(".git", "");
-        
+
         wiki.append("# ").append(projectName).append("\n\n");
         wiki.append("> A comprehensive software project managed and analyzed by MindVex\n\n");
-        
+
         wiki.append("## Table of Contents\n\n");
         wiki.append("- [Overview](#overview)\n");
         wiki.append("- [Features](#features)\n");
@@ -926,25 +1211,27 @@ public class LivingWikiService {
         wiki.append("- [License](#license)\n");
         wiki.append("- [Support](#support)\n");
         wiki.append("- [Project Status](#project-status)\n\n");
-        
+
         wiki.append("## Overview\n\n");
         wiki.append("**Repository:** ").append(repoUrl).append("\n\n");
         wiki.append("This project contains **").append(totalFiles).append(" files** across **")
                 .append(modules.size()).append(" modules** with **")
                 .append(totalDeps).append(" dependency relationships**.\n\n");
-        
+
         wiki.append("## Features\n\n");
         wiki.append("- ✅ Modular architecture with ").append(modules.size()).append(" distinct modules\n");
         wiki.append("- ✅ Comprehensive codebase with ").append(totalFiles).append(" source files\n");
         wiki.append("- ✅ Well-defined dependency relationships (").append(totalDeps).append(" connections)\n");
         wiki.append("- ✅ Managed and analyzed by MindVex intelligent code analysis platform\n\n");
-        
+
         wiki.append("## Tech Stack\n\n");
-        wiki.append("*To be documented* - Please run full analysis to detect technologies and frameworks used in this project.\n\n");
-        
+        wiki.append(
+                "*To be documented* - Please run full analysis to detect technologies and frameworks used in this project.\n\n");
+
         wiki.append("## Installation and Setup\n\n");
         wiki.append("### Prerequisites\n\n");
-        wiki.append("*To be documented* - Prerequisites will be identified after analyzing package managers and build files.\n\n");
+        wiki.append(
+                "*To be documented* - Prerequisites will be identified after analyzing package managers and build files.\n\n");
         wiki.append("### Installation Steps\n\n");
         wiki.append("```bash\n");
         wiki.append("# Clone the repository\n");
@@ -954,14 +1241,16 @@ public class LivingWikiService {
         wiki.append("# (Command will be identified based on project type)\n");
         wiki.append("```\n\n");
         wiki.append("### Configuration\n\n");
-        wiki.append("*To be documented* - Configuration details will be extracted from config files during analysis.\n\n");
-        
+        wiki.append(
+                "*To be documented* - Configuration details will be extracted from config files during analysis.\n\n");
+
         wiki.append("## Usage Examples\n\n");
-        wiki.append("*To be documented* - Usage examples will be generated based on entry points and API endpoints found in the code.\n\n");
-        
+        wiki.append(
+                "*To be documented* - Usage examples will be generated based on entry points and API endpoints found in the code.\n\n");
+
         wiki.append("## Project Structure\n\n");
         wiki.append("The project is organized into the following modules:\n\n");
-        
+
         for (var entry : modules.entrySet()) {
             wiki.append("### ").append(entry.getKey()).append("\n\n");
             wiki.append("Contains ").append(entry.getValue().size()).append(" files:\n\n");
@@ -971,7 +1260,7 @@ public class LivingWikiService {
             }
             wiki.append("\n");
         }
-        
+
         wiki.append("## Contributing\n\n");
         wiki.append("Contributions are welcome! Please follow these guidelines:\n\n");
         wiki.append("1. Fork the repository\n");
@@ -979,20 +1268,22 @@ public class LivingWikiService {
         wiki.append("3. Commit your changes (`git commit -m 'Add amazing feature'`)\n");
         wiki.append("4. Push to the branch (`git push origin feature/amazing-feature`)\n");
         wiki.append("5. Open a Pull Request\n\n");
-        
+
         wiki.append("## License\n\n");
         wiki.append("*To be documented* - License information will be extracted from LICENSE file if present.\n\n");
-        
+
         wiki.append("## Credits and Acknowledgments\n\n");
-        wiki.append("- **Analysis Platform**: [MindVex](https://github.com/hariPrasathK-Dev/MindVex_Editor_Frontend)\n");
+        wiki.append(
+                "- **Analysis Platform**: [MindVex](https://github.com/hariPrasathK-Dev/MindVex_Editor_Frontend)\n");
         wiki.append("- **Contributors**: To be documented\n");
         wiki.append("- **Third-party Libraries**: To be identified during dependency analysis\n\n");
-        
+
         wiki.append("## Support\n\n");
         wiki.append("For questions and support:\n\n");
-        wiki.append("- 📝 Create an issue in the [issue tracker](").append(repoUrl.replace(".git", "/issues")).append(")\n");
+        wiki.append("- 📝 Create an issue in the [issue tracker](").append(repoUrl.replace(".git", "/issues"))
+                .append(")\n");
         wiki.append("- 💬 Check existing discussions for common questions\n\n");
-        
+
         wiki.append("## Project Status\n\n");
         wiki.append("🔄 **Active Development** - This project is being actively analyzed and documented.\n\n");
         wiki.append("### Roadmap\n\n");
@@ -1002,8 +1293,9 @@ public class LivingWikiService {
         wiki.append("- [ ] Create architecture diagrams\n");
         wiki.append("- [ ] Document configuration and deployment procedures\n\n");
         wiki.append("---\n\n");
-        wiki.append("*This documentation was auto-generated by MindVex. For comprehensive documentation, please run a full Living Wiki generation with an AI provider configured.*\n");
-        
+        wiki.append(
+                "*This documentation was auto-generated by MindVex. For comprehensive documentation, please run a full Living Wiki generation with an AI provider configured.*\n");
+
         return wiki.toString();
     }
 
