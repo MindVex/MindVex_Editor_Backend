@@ -83,13 +83,13 @@ public class LivingWikiService {
         boolean readmeExists = allFiles.stream()
                 .anyMatch(f -> f.toLowerCase().endsWith("readme.md") || f.toLowerCase().equals("readme.md"));
         String originalReadmeContent = "";
-        
+
         if (readmeExists && embeddingCount > 0) {
             try {
                 log.info("[LivingWiki] README.md detected in project, retrieving existing content...");
                 List<VectorEmbedding> readmeChunks = embeddingService.semanticSearch(
-                    userId, repoUrl, "complete README.md file documentation content", 10);
-                
+                        userId, repoUrl, "complete README.md file documentation content", 10);
+
                 StringBuilder readmeBuilder = new StringBuilder();
                 for (VectorEmbedding chunk : readmeChunks) {
                     if (chunk.getFilePath().toLowerCase().contains("readme")) {
@@ -97,7 +97,7 @@ public class LivingWikiService {
                     }
                 }
                 originalReadmeContent = readmeBuilder.toString();
-                
+
                 if (!originalReadmeContent.isBlank()) {
                     log.info("[LivingWiki] Retrieved existing README.md ({} chars)", originalReadmeContent.length());
                 } else {
@@ -114,7 +114,7 @@ public class LivingWikiService {
         // Use embeddings to gather rich semantic context for documentation
         StringBuilder semanticContext = new StringBuilder();
         int apiChunksCount = 0; // Track API-related chunks for conditional generation
-        
+
         if (embeddingCount > 0) {
             try {
                 log.info("[LivingWiki] Retrieving semantic context via embeddings (count={})", embeddingCount);
@@ -380,10 +380,10 @@ public class LivingWikiService {
             } else {
                 log.info("[LivingWiki] [1/3] Generating README.md from scratch...");
             }
-            String readmeContext = buildReadmeContext(context.toString(), semanticContext.toString(), 
-                readmeExists, originalReadmeContent);
-            String readme = generateSingleFileWithMode("README.md", readmeContext, provider, 
-                readmeExists, originalReadmeContent);
+            String readmeContext = buildReadmeContext(context.toString(), semanticContext.toString(),
+                    readmeExists, originalReadmeContent);
+            String readme = generateSingleFileWithMode("README.md", readmeContext, provider,
+                    readmeExists, originalReadmeContent);
             if (readme != null && !readme.isBlank()) {
                 documentationFiles.put("README.md", readme);
                 if (readmeExists) {
@@ -435,26 +435,27 @@ public class LivingWikiService {
 
     /**
      * Build focused context for README.md generation.
-     * Includes: repository structure, general code chunks (NOT API-specific), and existing README if available
+     * Includes: repository structure, general code chunks (NOT API-specific), and
+     * existing README if available
      */
-    private String buildReadmeContext(String structureContext, String semanticContext, 
-                                     boolean readmeExists, String originalReadmeContent) {
+    private String buildReadmeContext(String structureContext, String semanticContext,
+            boolean readmeExists, String originalReadmeContent) {
         StringBuilder readmeCtx = new StringBuilder();
-        
+
         // Add flag for generation mode
         if (readmeExists) {
             readmeCtx.append("GENERATION_MODE: UPDATE_EXISTING\n\n");
         } else {
             readmeCtx.append("GENERATION_MODE: CREATE_NEW\n\n");
         }
-        
+
         readmeCtx.append(structureContext); // Repository structure, file counts
 
         // Include existing README content if available (truncate for AI analysis)
         if (readmeExists && originalReadmeContent != null && !originalReadmeContent.isBlank()) {
-            String truncatedOriginal = originalReadmeContent.length() > 8000 
-                ? originalReadmeContent.substring(0, 8000) + "\n... (truncated for analysis)"
-                : originalReadmeContent;
+            String truncatedOriginal = originalReadmeContent.length() > 8000
+                    ? originalReadmeContent.substring(0, 8000) + "\n... (truncated for analysis)"
+                    : originalReadmeContent;
             readmeCtx.append("\n\n─── EXISTING README.md CONTENT ───\n");
             readmeCtx.append(truncatedOriginal);
             readmeCtx.append("\n─── END EXISTING README ───\n");
@@ -525,12 +526,13 @@ public class LivingWikiService {
     }
 
     /**
-     * Generate a single documentation file with mode awareness (create new vs update existing).
+     * Generate a single documentation file with mode awareness (create new vs
+     * update existing).
      * Delegates to generateSingleFile with extracted parameters.
      */
-    private String generateSingleFileWithMode(String fileName, String focusedContext, 
-                                             Map<String, Object> provider, 
-                                             boolean existingDoc, String originalContent) {
+    private String generateSingleFileWithMode(String fileName, String focusedContext,
+            Map<String, Object> provider,
+            boolean existingDoc, String originalContent) {
         // For README, use batched generation with mode awareness
         if ("README.md".equals(fileName)) {
             return generateReadmeBatched(focusedContext, provider, existingDoc, originalContent);
@@ -679,7 +681,8 @@ public class LivingWikiService {
 
             // Guard: Return null if no endpoints found after cleaning
             if (cleanedEndpoints.isEmpty()) {
-                log.warn("[LivingWiki] No clean endpoints found after extraction and deduplication, skipping API reference");
+                log.warn(
+                        "[LivingWiki] No clean endpoints found after extraction and deduplication, skipping API reference");
                 return null;
             }
 
@@ -717,10 +720,10 @@ public class LivingWikiService {
      * Splits code chunks into smaller batches, generates each separately, then
      * combines.
      */
-    private String generateReadmeBatched(String readmeContext, Map<String, Object> provider, 
-                                        boolean readmeExists, String originalReadmeContent) {
-        log.info("[LivingWiki] README context too large ({}chars), splitting into batches (mode: {})", 
-            readmeContext.length(), readmeExists ? "UPDATE" : "CREATE");
+    private String generateReadmeBatched(String readmeContext, Map<String, Object> provider,
+            boolean readmeExists, String originalReadmeContent) {
+        log.info("[LivingWiki] README context too large ({}chars), splitting into batches (mode: {})",
+                readmeContext.length(), readmeExists ? "UPDATE" : "CREATE");
 
         try {
             // Extract repository structure (small part)
@@ -776,8 +779,8 @@ public class LivingWikiService {
                 // UPDATE MODE: Start with original content
                 if (originalReadmeContent != null && !originalReadmeContent.isBlank()) {
                     combinedReadme.append(originalReadmeContent).append("\n\n");
-                    log.info("[LivingWiki] ✓ Original README content preserved ({} chars)", 
-                        originalReadmeContent.length());
+                    log.info("[LivingWiki] ✓ Original README content preserved ({} chars)",
+                            originalReadmeContent.length());
                 }
             }
 
@@ -826,12 +829,12 @@ public class LivingWikiService {
      */
     private String generateReadmeHeader(String repoStructure, Map<String, Object> provider, boolean updateMode) {
         String prompt;
-        
+
         if (updateMode) {
             // This shouldn't be called in update mode, but handle it gracefully
             return "";
         }
-        
+
         prompt = """
                 Generate a comprehensive README.md header for this repository.
 
@@ -872,61 +875,62 @@ public class LivingWikiService {
     /**
      * Generate additional README content from code batch.
      */
-    private String generateReadmeBatchContent(String batchContext, Map<String, Object> provider, 
-                                            int batchNum, boolean updateMode) {
+    private String generateReadmeBatchContent(String batchContext, Map<String, Object> provider,
+            int batchNum, boolean updateMode) {
         String prompt;
-        
+
         if (updateMode) {
             // UPDATE MODE: Generate only new/undocumented features
             prompt = """
-                **CRITICAL INSTRUCTION: Your task is to identify NEW features, components, or technical details 
-                in the provided code that are NOT already documented in the existing README.**
+                    **CRITICAL INSTRUCTION: Your task is to identify NEW features, components, or technical details
+                    in the provided code that are NOT already documented in the existing README.**
 
-                DO NOT:
-                - Repeat or rephrase anything already in the existing README
-                - Modify the original README content
-                - Generate generic sections
+                    DO NOT:
+                    - Repeat or rephrase anything already in the existing README
+                    - Modify the original README content
+                    - Generate generic sections
 
-                DO:
-                - Identify NEW technical stack components not mentioned
-                - Find NEW features or capabilities evident in code
-                - Detect NEW API endpoints or modules not documented
+                    DO:
+                    - Identify NEW technical stack components not mentioned
+                    - Find NEW features or capabilities evident in code
+                    - Detect NEW API endpoints or modules not documented
 
-                If you find new undocumented elements, format them under this header:
-                ## 🔍 Recent Intelligent Updates (Batch %d)
+                    If you find new undocumented elements, format them under this header:
+                    ## 🔍 Recent Intelligent Updates (Batch %d)
 
-                Code Analysis:
-                %s
+                    Code Analysis:
+                    %s
 
-                Output markdown (no delimiters). If nothing new is found, output "No new undocumented features detected."
-                """.formatted(batchNum, batchContext);
+                    Output markdown (no delimiters). If nothing new is found, output "No new undocumented features detected."
+                    """
+                    .formatted(batchNum, batchContext);
         } else {
             // CREATE MODE: Generate full technical details
             prompt = """
-                Extract technical details from this code (batch %d for README.md).
+                    Extract technical details from this code (batch %d for README.md).
 
-                **CRITICAL: Extract ONLY from code provided. DO NOT hallucinate.**
+                    **CRITICAL: Extract ONLY from code provided. DO NOT hallucinate.**
 
-                Generate these sections:
+                    Generate these sections:
 
-                ## Tech Stack
-                - Identify from imports/decorators:
-                  * Python: `from flask import` → Flask
-                  * Java: `import org.springframework` → Spring Boot
-                  * JavaScript: `import express` → Express
+                    ## Tech Stack
+                    - Identify from imports/decorators:
+                      * Python: `from flask import` → Flask
+                      * Java: `import org.springframework` → Spring Boot
+                      * JavaScript: `import express` → Express
 
-                ## Installation
-                - Prerequisites (based on detected tech)
-                - Installation steps
+                    ## Installation
+                    - Prerequisites (based on detected tech)
+                    - Installation steps
 
-                ## Usage
-                - Basic usage examples (if evident from code)
+                    ## Usage
+                    - Basic usage examples (if evident from code)
 
-                Code Analysis:
-                %s
+                    Code Analysis:
+                    %s
 
-                Output markdown (no delimiters). Extract factual information only.
-                """.formatted(batchNum, batchContext);
+                    Output markdown (no delimiters). Extract factual information only.
+                    """.formatted(batchNum, batchContext);
         }
 
         // Retry logic for rate limit errors

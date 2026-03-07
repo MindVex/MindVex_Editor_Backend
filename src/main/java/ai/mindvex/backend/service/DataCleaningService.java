@@ -268,7 +268,8 @@ public class DataCleaningService {
   }
 
   /**
-   * Call AI provider to extract endpoints as JSON with retry logic for rate limits
+   * Call AI provider to extract endpoints as JSON with retry logic for rate
+   * limits
    */
   private String callAiForExtraction(String prompt, Map<String, Object> provider) {
     if (provider == null) {
@@ -296,7 +297,7 @@ public class DataCleaningService {
 
       // Retry logic for rate limits (3 attempts with exponential backoff)
       int maxRetries = 3;
-      long[] retryDelays = {30000, 60000, 120000}; // 30s, 60s, 120s
+      long[] retryDelays = { 30000, 60000, 120000 }; // 30s, 60s, 120s
 
       for (int attempt = 0; attempt < maxRetries; attempt++) {
         try {
@@ -325,7 +326,7 @@ public class DataCleaningService {
 
           if (isRateLimit && attempt < maxRetries - 1) {
             long delay = retryDelays[attempt];
-            log.warn("[DataCleaning] Rate limit hit (attempt {}/{}). Retrying in {}s...", 
+            log.warn("[DataCleaning] Rate limit hit (attempt {}/{}). Retrying in {}s...",
                 attempt + 1, maxRetries, delay / 1000);
             try {
               Thread.sleep(delay);
@@ -335,7 +336,7 @@ public class DataCleaningService {
               return null;
             }
           } else {
-            log.warn("[DataCleaning] AI extraction failed (attempt {}/{}): {}", 
+            log.warn("[DataCleaning] AI extraction failed (attempt {}/{}): {}",
                 attempt + 1, maxRetries, errorMsg);
             if (attempt == maxRetries - 1) {
               // Last attempt failed
