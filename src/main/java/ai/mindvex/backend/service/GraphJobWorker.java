@@ -20,7 +20,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Async job worker that polls the index_jobs table for pending graph_build jobs.
+ * Async job worker that polls the index_jobs table for pending graph_build
+ * jobs.
  *
  * When a graph_build job is found, it uses SourceCodeDependencyExtractor to
  * clone the repo, parse import statements, and populate file_dependencies.
@@ -50,7 +51,7 @@ public class GraphJobWorker {
         job.setStatus("processing");
         job.setStartedAt(LocalDateTime.now());
         indexJobRepository.save(job);
-        
+
         // Extract repoId for WebSocket topic
         String repoId = extractRepoId(job.getRepoUrl());
 
@@ -79,10 +80,10 @@ public class GraphJobWorker {
 
         } catch (Exception e) {
             log.error("graph_build job id={} failed: {}", job.getId(), e.getMessage(), e);
-            
+
             // Send error notification via WebSocket
             broadcastErrorMessage(repoId, e.getMessage());
-            
+
             job.setStatus("failed");
             job.setErrorMsg(e.getMessage());
             job.setFinishedAt(LocalDateTime.now());
@@ -90,7 +91,7 @@ public class GraphJobWorker {
 
         indexJobRepository.save(job);
     }
-    
+
     /**
      * Extract repository ID from URL for WebSocket topic identification
      */
@@ -103,7 +104,7 @@ public class GraphJobWorker {
         }
         return repoUrl.replaceAll("[^a-zA-Z0-9-]", "-");
     }
-    
+
     /**
      * Broadcast job start message to WebSocket subscribers
      */
@@ -117,10 +118,10 @@ public class GraphJobWorker {
                         .message("Graph extraction started")
                         .build())
                 .build();
-        
+
         webSocketController.broadcastGraphUpdate(repoId, message);
     }
-    
+
     /**
      * Broadcast error message to WebSocket subscribers
      */
@@ -134,7 +135,7 @@ public class GraphJobWorker {
                         .message(errorMsg)
                         .build())
                 .build();
-        
+
         webSocketController.broadcastGraphUpdate(repoId, message);
     }
 }
