@@ -69,6 +69,24 @@ public class GitProxyController {
   }
 
   /**
+   * Proxy all PUT requests to git servers
+   */
+  @PutMapping("/**")
+  public ResponseEntity<byte[]> proxyPut(
+      HttpServletRequest request,
+      @RequestHeader HttpHeaders headers,
+      @RequestBody(required = false) byte[] body,
+      Authentication authentication) {
+
+    // Extract the target URL from the request path
+    String path = request.getRequestURI().substring("/api/git-proxy/".length());
+    String queryString = request.getQueryString();
+    String targetUrl = "https://" + path + (queryString != null ? "?" + queryString : "");
+
+    return forwardRequest(targetUrl, HttpMethod.PUT, headers, body, authentication);
+  }
+
+  /**
    * Forward the request to the target URL with GitHub authentication if available
    */
   private ResponseEntity<byte[]> forwardRequest(
@@ -126,12 +144,16 @@ public class GitProxyController {
           requestEntity,
           byte[].class);
 
-      // Return the response with CORS headers
+      // Clean up response headers to avoid conflicting CORS headers
       HttpHeaders responseHeaders = new HttpHeaders();
       responseHeaders.putAll(response.getHeaders());
-      responseHeaders.set("Access-Control-Allow-Origin", "*");
-      responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-      responseHeaders.set("Access-Control-Allow-Headers", "*");
+
+      // Let Spring's global CorsFilter handle CORS instead of GitHub's or our manual
+      // headers
+      responseHeaders.remove("Access-Control-Allow-Origin");
+      responseHeaders.remove("Access-Control-Allow-Methods");
+      responseHeaders.remove("Access-Control-Allow-Headers");
+      responseHeaders.remove("Access-Control-Allow-Credentials");
 
       return ResponseEntity
           .status(response.getStatusCode())
@@ -152,12 +174,7 @@ public class GitProxyController {
    */
   @RequestMapping(value = "/**", method = RequestMethod.OPTIONS)
   public ResponseEntity<Void> handleOptions() {
-    HttpHeaders headers = new HttpHeaders();
-    headers.set("Access-Control-Allow-Origin", "*");
-    headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    headers.set("Access-Control-Allow-Headers", "*");
-    headers.set("Access-Control-Max-Age", "3600");
-
-    return ResponseEntity.ok().headers(headers).build();
+    // Spring Boot's global CorsFilter handles preflight
+    return ResponseEntity.ok().build();
   }
 }
