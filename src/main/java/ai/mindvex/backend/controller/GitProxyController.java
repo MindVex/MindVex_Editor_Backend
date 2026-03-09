@@ -45,10 +45,10 @@ public class GitProxyController {
       @PathVariable String path,
       @RequestHeader HttpHeaders headers,
       Authentication authentication) {
-    
+
     String cleanPath = path.startsWith("/") ? path.substring(1) : path;
     log.info("[GitProxy-DEBUG] GET Proxy for path: {}", cleanPath);
-    
+
     String queryString = request.getQueryString();
     String targetUrl = "https://" + cleanPath + (queryString != null ? "?" + queryString : "");
 
@@ -65,10 +65,10 @@ public class GitProxyController {
       @RequestHeader HttpHeaders headers,
       @RequestBody(required = false) byte[] body,
       Authentication authentication) {
-    
+
     String cleanPath = path.startsWith("/") ? path.substring(1) : path;
     log.info("[GitProxy-DEBUG] POST Proxy for path: {}", cleanPath);
-    
+
     String queryString = request.getQueryString();
     String targetUrl = "https://" + cleanPath + (queryString != null ? "?" + queryString : "");
 
@@ -85,10 +85,10 @@ public class GitProxyController {
       @RequestHeader HttpHeaders headers,
       @RequestBody(required = false) byte[] body,
       Authentication authentication) {
-    
+
     String cleanPath = path.startsWith("/") ? path.substring(1) : path;
     log.info("[GitProxy-DEBUG] PUT Proxy for path: {}", cleanPath);
-    
+
     String queryString = request.getQueryString();
     String targetUrl = "https://" + cleanPath + (queryString != null ? "?" + queryString : "");
 
@@ -128,6 +128,7 @@ public class GitProxyController {
       });
 
       // Add GitHub authentication for GitHub requests
+      boolean tokenInjected = false;
       if (targetUrl.contains("github.com") && authentication != null && authentication.isAuthenticated()
           && authentication.getPrincipal() instanceof UserDetails) {
         try {
@@ -138,6 +139,7 @@ public class GitProxyController {
             // Use standard Bearer token for GitHub REST API
             String token = user.getGithubAccessToken();
             outgoingHeaders.set("Authorization", "Bearer " + token);
+            tokenInjected = true;
             log.info("[GitProxy] Injected GitHub Bearer token for user: {}", user.getEmail());
           } else {
             log.warn("[GitProxy] No GitHub token found for user: {}", userDetails.getUsername());
@@ -145,6 +147,10 @@ public class GitProxyController {
         } catch (Exception e) {
           log.error("[GitProxy] Failed to get GitHub token for user: {}", e.getMessage());
         }
+      }
+
+      if (!tokenInjected && targetUrl.contains("github.com") && method != HttpMethod.GET) {
+        log.warn("[GitProxy] CRITICAL: No GitHub token for write operation (POST/PUT/DELETE) to {}", targetUrl);
       }
 
       // Force GitHub to send uncompressed data
@@ -166,23 +172,25 @@ public class GitProxyController {
           requestEntity,
           byte[].class);
 
-      log.info("[GitProxy] Target responded with: {} (Size: {} bytes)", 
-          response.getStatusCode(), 
+      log.info("[GitProxy] Target responded with: {} (Size: {} bytes)",
+          response.getStatusCode(),
           response.getBody() != null ? response.getBody().length : 0);
-      
+
       response.getHeaders().forEach((key, value) -> log.debug("[GitProxy] Target Header: {} = {}", key, value));
 
       // Clean up response headers to avoid conflicting CORS headers
       HttpHeaders responseHeaders = new HttpHeaders();
       responseHeaders.putAll(response.getHeaders());
 
-      // Let Spring's global CorsFilter handle CORS instead of GitHub's or our manual headers
+      // Let Spring's global CorsFilter handle CORS instead of GitHub's or our manual
+      // headers
       responseHeaders.remove("Access-Control-Allow-Origin");
       responseHeaders.remove("Access-Control-Allow-Methods");
       responseHeaders.remove("Access-Control-Allow-Headers");
       responseHeaders.remove("Access-Control-Allow-Credentials");
-      
-      // CRITICAL: Remove Transfer-Encoding as it conflicts with Spring Boot's response handling
+
+      // CRITICAL: Remove Transfer-Encoding as it conflicts with Spring Boot's
+      // response handling
       responseHeaders.remove("Transfer-Encoding");
       responseHeaders.remove("Content-Encoding"); // GitHub might send gzip, but RestTemplate already decompressed it
       responseHeaders.remove("Content-Length"); // Spring will calculate it automatically
@@ -203,7 +211,8 @@ public class GitProxyController {
 
       return ResponseEntity
           .status(HttpStatus.BAD_GATEWAY)
-          .body(("Git proxy error: " + e.getMessage()).getBytes());
+          .body(("Git proxy error for [" + targetUrl + "]: " + e.getMessage()
+              + ". Check if GitHub Token is configured in account settings.").getBytes());
     }
   }
 
