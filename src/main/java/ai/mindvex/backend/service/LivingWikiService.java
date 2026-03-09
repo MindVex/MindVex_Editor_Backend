@@ -78,34 +78,35 @@ public class LivingWikiService {
             log.warn("[LivingWiki] Could not load embedding count (table may not exist yet): {}", e.getMessage());
         }
 
-        // ─── Existing README Detection ─────────────────────────────────────
-        // Check if README.md already exists in the project
+        // ─── PHASE 3: MICRO-REPOSITORY DEFENSIVE FALLBACK ─────────────────────
+        boolean isMicroRepository = allFiles.size() < 3;
+        String repositorySizeFlag = "";
+
+        if (isMicroRepository) {
+            log.warn("[LivingWiki] Micro-repository detected ({} files). Applying defensive constraints.",
+                    allFiles.size());
+            repositorySizeFlag = "\n[SYSTEM ALERT: This is a micro-repository with fewer than 3 files. Keep the README extremely brief and factual. Skip complex architectural sections. Do not hallucinate features or folder structures.]\n";
+        }
+
+        // ─── PHASE 1: EXISTING README EXTRACTION ─────────────────────────────────────
+        // Extract existing README.md from repository (using vector embeddings to reconstruct full content)
         boolean readmeExists = allFiles.stream()
                 .anyMatch(f -> f.toLowerCase().endsWith("readme.md") || f.toLowerCase().equals("readme.md"));
-        String originalReadmeContent = "";
+        String existingReadmeContent = "";
 
         if (readmeExists && embeddingCount > 0) {
             try {
-                log.info("[LivingWiki] README.md detected in project, retrieving existing content...");
-                List<VectorEmbedding> readmeChunks = embeddingService.semanticSearch(
-                        userId, repoUrl, "complete README.md file documentation content", 10);
+                log.info("[LivingWiki] README.md detected in project, extracting existing content...");
+                existingReadmeContent = extractExistingReadme(userId, repoUrl);
 
-                StringBuilder readmeBuilder = new StringBuilder();
-                for (VectorEmbedding chunk : readmeChunks) {
-                    if (chunk.getFilePath().toLowerCase().contains("readme")) {
-                        readmeBuilder.append(chunk.getChunkText()).append("\n");
-                    }
-                }
-                originalReadmeContent = readmeBuilder.toString();
-
-                if (!originalReadmeContent.isBlank()) {
-                    log.info("[LivingWiki] Retrieved existing README.md ({} chars)", originalReadmeContent.length());
+                if (!existingReadmeContent.isBlank()) {
+                    log.info("[LivingWiki] Successfully extracted existing README.md ({} chars)", existingReadmeContent.length());
                 } else {
                     log.warn("[LivingWiki] README.md detected but content could not be retrieved");
                     readmeExists = false;
                 }
             } catch (Exception e) {
-                log.warn("[LivingWiki] Failed to retrieve existing README.md: {}", e.getMessage());
+                log.warn("[LivingWiki] Failed to extract existing README.md: {}", e.getMessage());
                 readmeExists = false;
             }
         }
@@ -113,6 +114,7 @@ public class LivingWikiService {
         // ─── Semantic Context Retrieval ─────────────────────────────────────
         // Use embeddings to gather rich semantic context for documentation
         StringBuilder semanticContext = new StringBuilder();
+        semanticContext.append(repositorySizeFlag); // PHASE 3: Inject micro-repo flag
         int apiChunksCount = 0; // Track API-related chunks for conditional generation
 
         if (embeddingCount > 0) {
@@ -381,9 +383,9 @@ public class LivingWikiService {
                 log.info("[LivingWiki] [1/3] Generating README.md from scratch...");
             }
             String readmeContext = buildReadmeContext(context.toString(), semanticContext.toString(),
-                    readmeExists, originalReadmeContent);
+                    readmeExists, existingReadmeContent);
             String readme = generateSingleFileWithMode("README.md", readmeContext, provider,
-                    readmeExists, originalReadmeContent);
+                    readmeExists, existingReadmeContent);
             if (readme != null && !readme.isBlank()) {
                 documentationFiles.put("README.md", readme);
                 if (readmeExists) {
@@ -404,8 +406,11 @@ public class LivingWikiService {
 
             // File 3: api-reference.md (API documentation) - ONLY if API content was found
             boolean hasApiContent = apiChunksCount > 0;
-            if (hasApiContent) {
-                log.info("[LivingWiki] [3/3] Generating api-reference.md ({} API chunks found)...", apiChunksCount);
+            boolean isActualBackend = isBackendApi(allFiles, semanticContext.toString());
+
+            if (hasApiContent && isActualBackend) {
+                log.info("[LivingWiki] [3/3] Generating api-reference.md ({} API chunks found, backend confirmed)...",
+                        apiChunksCount);
                 String apiContext = buildApiContext(context.toString(), semanticContext.toString());
                 String apiRef = generateSingleFile("api-reference.md", apiContext, provider);
                 if (apiRef != null && !apiRef.isBlank()) {
@@ -413,7 +418,11 @@ public class LivingWikiService {
                     log.info("[LivingWiki] ✓ api-reference.md generated ({} chars)", apiRef.length());
                 }
             } else {
-                log.info("[LivingWiki] [3/3] Skipping api-reference.md (no API content detected)");
+                if (!isActualBackend) {
+                    log.info("[LivingWiki] [3/3] Skipping api-reference.md (frontend/non-API project detected)");
+                } else {
+                    log.info("[LivingWiki] [3/3] Skipping api-reference.md (no API content detected)");
+                }
             }
 
             // Valid to have 1-3 files depending on project type
@@ -434,43 +443,133 @@ public class LivingWikiService {
     }
 
     /**
-     * Build focused context for README.md generation.
-     * Includes: repository structure, general code chunks (NOT API-specific), and
-     * existing README if available
+     * PHASE 1: Extract existing README.md content from vector embeddings.
+     * Reconstructs the full README by fetching all chunks belonging to README.md file.
+     * 
+     * @param userId  User ID
+     * @param repoUrl Repository URL
+     * @return Full README content or empty string if not found
+     */
+    private String extractExistingReadme(Long userId, String repoUrl) {
+        try {
+            // Query embeddings repository directly for all README.md chunks
+            List<VectorEmbedding> allEmbeddings = embeddingRepo.findByUserIdAndRepoUrl(userId, repoUrl);
+            
+            // Filter for README.md file (case-insensitive)
+            List<VectorEmbedding> readmeChunks = allEmbeddings.stream()
+                .filter(emb -> emb.getFilePath() != null && 
+                               emb.getFilePath().toLowerCase().endsWith("readme.md"))
+                .sorted(Comparator.comparingInt(VectorEmbedding::getChunkIndex))
+                .collect(Collectors.toList());
+            
+            if (readmeChunks.isEmpty()) {
+                log.warn("[LivingWiki] No README.md chunks found in embeddings");
+                return "";
+            }
+            
+            // Reconstruct full README by concatenating chunks in order
+            StringBuilder fullReadme = new StringBuilder();
+            for (VectorEmbedding chunk : readmeChunks) {
+                fullReadme.append(chunk.getChunkText());
+                // Add newline between chunks if not already present
+                if (!chunk.getChunkText().endsWith("\n")) {
+                    fullReadme.append("\n");
+                }
+            }
+            
+            log.info("[LivingWiki] Reconstructed README.md from {} chunks", readmeChunks.size());
+            return fullReadme.toString().trim();
+            
+        } catch (Exception e) {
+            log.error("[LivingWiki] Error extracting existing README: {}", e.getMessage(), e);
+            return "";
+        }
+    }
+
+    /**
+     * Build focused context for README.md generation using MAP-REDUCE approach.
+     * PHASE 2 & 3: Injects existing README with XML tags and Preserve or Update instructions.
      */
     private String buildReadmeContext(String structureContext, String semanticContext,
-            boolean readmeExists, String originalReadmeContent) {
+            boolean readmeExists, String existingReadmeContent) {
         StringBuilder readmeCtx = new StringBuilder();
 
-        // Add flag for generation mode
-        if (readmeExists) {
-            readmeCtx.append("GENERATION_MODE: UPDATE_EXISTING\n\n");
+        // PHASE 2: Inject existing README with XML tags
+        if (readmeExists && existingReadmeContent != null && !existingReadmeContent.isBlank()) {
+            readmeCtx.append("<ExistingReadme>\n");
+            // Truncate if extremely large (keep most important content)
+            String readmeToInject = existingReadmeContent.length() > 12000
+                    ? existingReadmeContent.substring(0, 12000) + "\n... (truncated for analysis)"
+                    : existingReadmeContent;
+            readmeCtx.append(readmeToInject);
+            readmeCtx.append("\n</ExistingReadme>\n\n");
         } else {
-            readmeCtx.append("GENERATION_MODE: CREATE_NEW\n\n");
+            readmeCtx.append("<ExistingReadme>NONE</ExistingReadme>\n\n");
         }
 
+        // Add actual project structure
+        readmeCtx.append("<ActualProjectStructure>\n");
         readmeCtx.append(structureContext); // Repository structure, file counts
+        readmeCtx.append("\n</ActualProjectStructure>\n\n");
 
-        // Include existing README content if available (truncate for AI analysis)
-        if (readmeExists && originalReadmeContent != null && !originalReadmeContent.isBlank()) {
-            String truncatedOriginal = originalReadmeContent.length() > 8000
-                    ? originalReadmeContent.substring(0, 8000) + "\n... (truncated for analysis)"
-                    : originalReadmeContent;
-            readmeCtx.append("\n\n─── EXISTING README.md CONTENT ───\n");
-            readmeCtx.append(truncatedOriginal);
-            readmeCtx.append("\n─── END EXISTING README ───\n");
+        // MAP-REDUCE: Summarize directories first, not raw code
+        String generalChunks = "";
+        if (semanticContext != null && semanticContext.contains("═══ API ROUTES & ENDPOINTS ═══")) {
+            generalChunks = semanticContext.substring(0,
+                    semanticContext.indexOf("═══ API ROUTES & ENDPOINTS ═══"));
+        } else {
+            generalChunks = semanticContext != null ? semanticContext : "";
         }
 
-        // Extract ONLY general code chunks (NOT the "API ROUTES & ENDPOINTS" section)
-        if (semanticContext != null && semanticContext.contains("═══ API ROUTES & ENDPOINTS ═══")) {
-            String generalChunks = semanticContext.substring(0,
-                    semanticContext.indexOf("═══ API ROUTES & ENDPOINTS ═══"));
+        // Group code chunks by directory and create succinct summaries
+        Map<String, List<String>> directorySummaries = summarizeDirectories(generalChunks);
+
+        if (!directorySummaries.isEmpty()) {
+            readmeCtx.append("\n\n─── Directory-Level Analysis (Map-Reduce Summaries) ───\n");
+            for (Map.Entry<String, List<String>> entry : directorySummaries.entrySet()) {
+                readmeCtx.append("\n📁 ").append(entry.getKey()).append(":\n");
+                for (String summary : entry.getValue()) {
+                    readmeCtx.append("  • ").append(summary).append("\n");
+                }
+            }
+        } else {
+            // Fallback to raw chunks if summarization fails
             readmeCtx.append("\n\n─── Representative Code Samples ───\n");
             readmeCtx.append(generalChunks);
-        } else {
-            readmeCtx.append("\n\n─── Representative Code Samples ───\n");
-            readmeCtx.append(semanticContext != null ? semanticContext : "");
         }
+
+        // PHASE 3: Add "Preserve or Update" instructions at the end
+        readmeCtx.append("\n\n═══ INSTRUCTIONS ═══\n");
+        readmeCtx.append("""
+                You are a Documentation AI. You have been provided with an <ActualProjectStructure>, code context snippets, and an <ExistingReadme>.
+                
+                Follow these rules STRICTLY:
+                
+                1. **EVALUATE:** Compare the <ExistingReadme> against the <ActualProjectStructure> and the provided code context.
+                   - Check if the existing README mentions technologies, frameworks, or folders that don't exist in the current codebase.
+                   - Check if the existing README is missing important new folders or files from <ActualProjectStructure>.
+                   - Check if the tech stack described matches the actual imports and code patterns in the code context.
+                
+                2. **PRESERVE:** If the <ExistingReadme> is accurate, has no contradictions with the current codebase, and covers the primary files:
+                   - YOU MUST RETURN THE EXACT <ExistingReadme> CONTENT.
+                   - Do not change a single word, do not change the formatting, and do not add unnecessary fluff.
+                   - The existing documentation was written by humans and should be respected unless it's factually wrong.
+                
+                3. **UPDATE:** If the <ExistingReadme> contains contradictions OR is missing critical information:
+                   - UPDATE it by correcting inaccuracies and adding missing information.
+                   - PRESERVE the original author's writing style and structure as much as possible.
+                   - Only modify sections that are factually incorrect or incomplete.
+                   - Add new sections only if they're essential and missing.
+                   - Maintain the same tone, heading levels, and organization from the original.
+                
+                4. **GENERATE:** If <ExistingReadme> is 'NONE':
+                   - Generate a concise, accurate README from scratch.
+                   - Base it STRICTLY on the provided <ActualProjectStructure> and code context.
+                   - Do not hallucinate technologies, frameworks, or features not present in the code.
+                   - Keep it factual and brief.
+                
+                CRITICAL: Your primary obligation is to PRESERVE existing documentation unless there are factual contradictions. Do not "improve" or "enhance" accurate documentation.
+                """);
 
         return readmeCtx.toString();
     }
@@ -628,8 +727,13 @@ public class LivingWikiService {
             // 5000 chars ≈ 1250 tokens input + 1500 tokens output = ~2750 total
             // This ensures we stay well under the 6000 TPM limit even with recent usage
             int maxCharsPerBatch = 5000;
+
+            // Extract global project context for batch header
+            String globalContext = extractGlobalProjectContext(repoUrl, apiContext);
+
             List<List<String>> batches = createBatches(chunks, maxCharsPerBatch);
             log.info("[LivingWiki] Created {} batches for endpoint extraction", batches.size());
+            log.info("[LivingWiki] Global context: {}", globalContext);
 
             // Wait 60s before starting to ensure sliding window is clear from previous API
             // calls
@@ -650,9 +754,12 @@ public class LivingWikiService {
 
                 String batchContext = String.join("\n", batches.get(i));
 
+                // Inject global context header into batch
+                String enrichedBatchContext = globalContext + "\n\n" + batchContext;
+
                 // Use DataCleaningService to extract structured endpoints
                 List<ExtractedEndpoint> batchEndpoints = dataCleaningService.extractEndpointsFromChunks(
-                        batchContext, provider);
+                        enrichedBatchContext, provider);
 
                 if (!batchEndpoints.isEmpty()) {
                     allEndpoints.addAll(batchEndpoints);
@@ -909,28 +1016,28 @@ public class LivingWikiService {
             prompt = """
                     Extract technical details from this code (batch %d for README.md).
 
-                    **CRITICAL: Extract ONLY from code provided. DO NOT hallucinate.**
+                    **CRITICAL: Extract ONLY from code provided. DO NOT hallucinate or copy examples from this prompt.**
 
                     Generate these sections:
 
                     ## Tech Stack
-                    - Identify from imports/decorators:
-                      * Python: `from flask import` → Flask
-                      * Java: `import org.springframework` → Spring Boot
-                      * JavaScript: `import express` → Express
+                    - Identify frameworks and libraries STRICTLY from the provided import statements, decorators, and annotations in the code.
+                    - DO NOT assume or hallucinate any technology not explicitly present in the code context.
+                    - If the code context is very small or contains no clear framework indicators, output: "No specific frameworks detected in the analyzed context."
 
                     ## Installation
-                    - Prerequisites (based on detected tech)
-                    - Installation steps
+                    - Prerequisites (based ONLY on detected tech from code)
+                    - Installation steps (only if package.json, pom.xml, requirements.txt, etc. are visible in code)
 
                     ## Usage
-                    - Basic usage examples (if evident from code)
+                    - Basic usage examples (only if evident from actual code)
 
                     Code Analysis:
                     %s
 
-                    Output markdown (no delimiters). Extract factual information only.
-                    """.formatted(batchNum, batchContext);
+                    Output markdown (no delimiters). Extract factual information only. If information is missing, state "Not detected in code" instead of guessing.
+                    """
+                    .formatted(batchNum, batchContext);
         }
 
         // Retry logic for rate limit errors
@@ -1025,10 +1132,11 @@ public class LivingWikiService {
 
     /**
      * Generate documentation for a single batch of API endpoints with retry logic.
+     * PHASE 4: Includes global project context in every batch.
      */
     private String generateApiBatchDocumentation(String batchContext, Map<String, Object> provider,
-            int batchNum, int totalBatches) {
-        String prompt = buildApiBatchPrompt(batchContext, batchNum, totalBatches);
+            int batchNum, int totalBatches, String globalContext) {
+        String prompt = buildApiBatchPrompt(batchContext, batchNum, totalBatches, globalContext);
 
         // Retry logic for rate limit errors
         int maxRetries = 3;
@@ -1074,10 +1182,15 @@ public class LivingWikiService {
     }
 
     /**
-     * Build prompt for a batch of API endpoints.
+     * Build prompt for a batch of API endpoints with GLOBAL CONTEXT HEADER.
+     * The header ensures every batch knows project context despite being isolated.
      */
-    private String buildApiBatchPrompt(String batchContext, int batchNum, int totalBatches) {
+    private String buildApiBatchPrompt(String batchContext, int batchNum, int totalBatches, String globalContext) {
         return """
+                ═══ GLOBAL PROJECT CONTEXT (PERSISTENT ACROSS ALL BATCHES) ═══
+                %s
+                ═══ END GLOBAL CONTEXT ═══
+
                 You are documenting API endpoints (batch %d of %d).
 
                 **CRITICAL INSTRUCTIONS - READ CAREFULLY:**
@@ -1096,6 +1209,10 @@ public class LivingWikiService {
                 3. **HTTP Methods:**
                    - GET requests: DO NOT include request body
                    - POST/PUT/PATCH: Include request body if you see it in code
+
+                4. **OUTPUT FORMAT - CRITICAL:**
+                   - If expecting JSON: Return ONLY raw JSON, NO markdown code blocks (```json)
+                   - If expecting markdown: Return plain markdown, NO delimiters
 
                 For EACH endpoint in this batch:
 
@@ -1133,7 +1250,7 @@ public class LivingWikiService {
 
                 Output ONLY endpoint documentation (no headers, no "# API Reference" title).
                 """
-                .formatted(batchNum, totalBatches, batchContext);
+                .formatted(globalContext, batchNum, totalBatches, batchContext);
     }
 
     /**
@@ -1200,18 +1317,39 @@ public class LivingWikiService {
 
     /**
      * Clean batch response (remove any extra formatting).
+     * PHASE 4 ENHANCEMENT: Robust regex cleaner for JSON/markdown wrappers.
      */
     private String cleanBatchResponse(String response) {
         if (response == null)
             return "";
 
-        // Remove any markdown wrappers
+        // Aggressively remove markdown code blocks
+        // Pattern 1: ```json...``` or ```markdown...```
+        response = response.replaceAll("```json\\s*", "");
+        response = response.replaceAll("```markdown\\s*", "");
+        response = response.replaceAll("```\\s*", "");
+
+        // Pattern 2: Remove opening/closing ``` at start/end
         response = response.replaceAll("^```[a-z]*\\s*", "");
         response = response.replaceAll("```\\s*$", "");
+
+        // Pattern 3: Handle nested backticks
+        while (response.contains("```")) {
+            response = response.replaceFirst("```[a-z]*\\s*", "");
+            response = response.replaceFirst("```", "");
+        }
 
         // Remove "# API Reference" or similar headers if present
         response = response.replaceAll("(?m)^#\\s*API\\s*Reference\\s*$", "");
         response = response.replaceAll("(?m)^##\\s*Endpoints\\s*$", "");
+
+        // If response starts/ends with { or [, it's likely JSON - clean whitespace
+        response = response.trim();
+        if ((response.startsWith("{") && response.endsWith("}")) ||
+                (response.startsWith("[") && response.endsWith("]"))) {
+            // Keep as-is, it's already clean JSON
+            return response;
+        }
 
         return response.trim();
     }
@@ -1468,24 +1606,24 @@ public class LivingWikiService {
                       - Look for configuration files (config.py, application.properties, .env.example)
 
                    2. **EXTRACT FACTUAL INFORMATION FROM CODE**
-                      - Tech Stack: Identify from import statements, decorators, annotations
-                        * Python: `from flask import`, `from fastapi import`, `import django` → Flask/FastAPI/Django
-                        * Java: `import org.springframework` → Spring Boot
-                        * JavaScript: `import express`, `import React` → Express/React
+                      - Tech Stack: Identify frameworks STRICTLY from import statements, decorators, and annotations found in the code chunks below.
+                      - DO NOT copy technology names from this prompt. Only identify technologies you can PROVE exist in the provided code.
                       - Features: Extract from route definitions and their descriptions
-                        * If you see `/auth/login` and `/auth/register` → Authentication system
-                        * If you see `/posts` and `/timeline` → Social media posting
-                        * If you see `/inbox` and `/outbox` → Federation support
+                        * Example: If you see `/auth/login` and `/auth/register` routes → Authentication system
+                        * Example: If you see `/posts` and `/timeline` routes → Social media posting
+                        * If the provided code is minimal (< 100 lines total), keep feature descriptions brief and factual.
 
                    3. **DO NOT HALLUCINATE**
                       - ONLY document technologies you can CONFIRM from code chunks
                       - ONLY describe features you can SEE in the route/controller definitions
                       - If you don't see database code, don't claim "Uses PostgreSQL"
                       - If you don't see Redis imports, don't claim "Caching with Redis"
+                      - DO NOT copy example technologies from this instruction prompt (Flask, Spring Boot, Express, Django, etc.) unless you see them in the actual code.
 
                    4. **PROJECT STRUCTURE**
-                      - Use the "Module Structure" section provided below
-                      - DO NOT invent folders that are not listed
+                      - Output the Project Structure EXACTLY as provided in the 'Module Structure' section below.
+                      - DO NOT invent folders, files, or an ASCII tree that is not explicitly listed.
+                      - If the Module Structure section is empty or minimal, output: "Project structure analysis pending - run full code analysis first."
 
                    **README.md Structure:**
 
@@ -1501,9 +1639,9 @@ public class LivingWikiService {
                    - Highlight what makes this project stand out
 
                    ## Tech Stack
-                   - List technologies with versions (EXTRACT from code imports/decorators)
+                   - List technologies with versions (EXTRACT STRICTLY from code imports/decorators in the code chunks below)
                    - Include frameworks, libraries, and tools used
-                   - Example: If you see `@app.route` → Flask; `@app.get` → FastAPI; `@RequestMapping` → Spring Boot
+                   - Identify frameworks by analyzing actual import statements and decorators in the provided code. DO NOT use examples from this prompt.
 
                    ## Installation and Setup
                    ### Prerequisites
@@ -1526,7 +1664,8 @@ public class LivingWikiService {
 
                    ## Project Structure
                    - Brief overview of main directories and their purpose
-                   - ASCII tree of key folders (USE ONLY folders from "Module Structure" section below)
+                   - ASCII tree of key folders (USE ONLY folders explicitly listed in the "Module Structure" section below)
+                   - DO NOT create an invented ASCII tree. If Module Structure is empty, output: "Run full code analysis to generate project structure."
 
                    ## Contributing
                    - Guidelines for bug reports
@@ -2175,45 +2314,17 @@ public class LivingWikiService {
      */
     private String buildSingleFilePrompt(String fileName, String focusedContext) {
         if ("README.md".equals(fileName)) {
+            // README now has custom instructions injected in buildReadmeContext
+            // This prompt is simplified since detailed instructions are in context
             return """
-                    You are a senior technical documentation engineer. Generate a comprehensive README.md for this repository.
-
-                    **CRITICAL: Extract information from the code provided below. DO NOT hallucinate.**
-
-                    Generate a README.md with these sections:
-
-                    # Project Title
-                    - Descriptive title
-                    - Brief description (1-2 sentences)
-
-                    ## Features
-                    - Key features (extract from API endpoints in code)
-
-                    ## Tech Stack
-                    - Extract from imports/decorators:
-                      * Python: `from flask import` → Flask, `from fastapi import` → FastAPI
-                      * Java: `import org.springframework` → Spring Boot
-                      * JavaScript: `import express` → Express
-
-                    ## Installation
-                    ### Prerequisites
-                    - Based on detected tech stack
-                    ### Installation Steps
-                    - Clone, dependencies, configuration
-
-                    ## Usage
-                    - Basic usage examples
-
-                    ## Project Structure
-                    - Main directories (use actual structure from context)
-
-                    ## Contributing, License, Support
-                    - Standard sections
-
-                    **Repository Context:**
+                    Generate or update the README.md based on the provided context.
+                    
+                    Follow the instructions in the context carefully, especially regarding <ExistingReadme> and <ActualProjectStructure>.
+                    
+                    **Context:**
                     %s
-
-                    Output ONLY the README.md markdown content (no delimiters, no wrappers).
+                    
+                    Output ONLY the README.md markdown content (no delimiters, no wrappers, no explanations).
                     """
                     .formatted(focusedContext);
 
@@ -2648,5 +2759,298 @@ public class LivingWikiService {
         return userRepository.findById(userId)
                 .map(User::getGithubAccessToken)
                 .orElse(null);
+    }
+
+    /**
+     * PRE-FLIGHT CLASSIFICATION: Detect if repository is actually a backend API.
+     * Prevents generating api-reference.md for pure frontend or non-API projects.
+     * 
+     * @param allFiles        Set of all file paths in the repository
+     * @param semanticContext Semantic code samples for additional validation
+     * @return true if this is a backend API project, false otherwise
+     */
+    private boolean isBackendApi(Set<String> allFiles, String semanticContext) {
+        if (allFiles.isEmpty()) {
+            return false;
+        }
+
+        int backendScore = 0;
+        int frontendScore = 0;
+
+        // Check for backend framework indicators
+        for (String file : allFiles) {
+            String lowerFile = file.toLowerCase();
+
+            // Spring Boot / Java backend
+            if (lowerFile.contains("pom.xml") || lowerFile.contains("build.gradle")) {
+                backendScore += 3;
+            }
+            if (lowerFile.contains("controller") || lowerFile.contains("service") ||
+                    lowerFile.contains("repository") || lowerFile.contains("entity")) {
+                backendScore += 2;
+            }
+            if (lowerFile.endsWith(".java") && (lowerFile.contains("rest") || lowerFile.contains("api"))) {
+                backendScore += 2;
+            }
+
+            // Express.js / Node backend
+            if (lowerFile.equals("package.json")) {
+                backendScore += 1; // Neutral - could be frontend or backend
+            }
+            if (lowerFile.contains("routes") || lowerFile.contains("middleware")) {
+                backendScore += 2;
+            }
+            if (lowerFile.contains("server.js") || lowerFile.contains("app.js") || lowerFile.contains("index.js")) {
+                backendScore += 1;
+            }
+
+            // Python backend (Flask, FastAPI, Django)
+            if (lowerFile.contains("requirements.txt") || lowerFile.contains("pyproject.toml")) {
+                backendScore += 2;
+            }
+            if (lowerFile.contains("views.py") || lowerFile.contains("urls.py") ||
+                    lowerFile.contains("models.py") || lowerFile.contains("serializers.py")) {
+                backendScore += 2;
+            }
+            if (lowerFile.contains("main.py") || lowerFile.contains("app.py")) {
+                backendScore += 1;
+            }
+
+            // Go backend
+            if (lowerFile.endsWith(".go") && (lowerFile.contains("handler") || lowerFile.contains("router"))) {
+                backendScore += 2;
+            }
+
+            // Frontend indicators (penalize backend score)
+            if (lowerFile.contains("next.config") || lowerFile.contains("vite.config") ||
+                    lowerFile.contains("webpack.config")) {
+                frontendScore += 3;
+            }
+            if (lowerFile.contains("components") || lowerFile.contains("pages") ||
+                    lowerFile.contains("hooks") || lowerFile.contains("styles")) {
+                frontendScore += 1;
+            }
+            if (lowerFile.endsWith(".tsx") || lowerFile.endsWith(".jsx") || lowerFile.endsWith(".vue")) {
+                frontendScore += 1;
+            }
+        }
+
+        // Additional semantic validation
+        if (semanticContext != null) {
+            String lowerContext = semanticContext.toLowerCase();
+
+            // Backend framework keywords
+            if (lowerContext.contains("@restcontroller") || lowerContext.contains("@requestmapping") ||
+                    lowerContext.contains("spring")) {
+                backendScore += 5;
+            }
+            if (lowerContext.contains("express(") || lowerContext.contains("app.listen") ||
+                    lowerContext.contains("router.get") || lowerContext.contains("router.post")) {
+                backendScore += 5;
+            }
+            if (lowerContext.contains("fastapi") || lowerContext.contains("flask") ||
+                    lowerContext.contains("@app.route") || lowerContext.contains("@app.get")) {
+                backendScore += 5;
+            }
+            if (lowerContext.contains("gin.engine") || lowerContext.contains("http.handlefunc")) {
+                backendScore += 5;
+            }
+
+            // Frontend framework keywords
+            if (lowerContext.contains("react") || lowerContext.contains("usestate") ||
+                    lowerContext.contains("useeffect") || lowerContext.contains("jsx")) {
+                frontendScore += 3;
+            }
+            if (lowerContext.contains("next/") || lowerContext.contains("getserversideprops")) {
+                frontendScore += 3;
+            }
+            if (lowerContext.contains("vue") || lowerContext.contains("v-model") ||
+                    lowerContext.contains("v-if")) {
+                frontendScore += 3;
+            }
+        }
+
+        log.info("[BackendClassification] Score: backend={}, frontend={}", backendScore, frontendScore);
+
+        // Decision: Backend if backend score significantly higher
+        // Allow 2:1 ratio since modern backends may have some frontend code
+        return backendScore >= 5 && backendScore > (frontendScore * 0.5);
+    }
+
+    /**
+     * MAP-REDUCE: Summarize code chunks by directory into concise 1-2 sentence
+     * summaries.
+     * This gives LLM holistic view while saving massive tokens.
+     * 
+     * @param codeChunks Raw code chunks from semantic search
+     * @return Map of directory -> list of summaries
+     */
+    private Map<String, List<String>> summarizeDirectories(String codeChunks) {
+        Map<String, List<String>> dirSummaries = new LinkedHashMap<>();
+
+        if (codeChunks == null || codeChunks.isBlank()) {
+            return dirSummaries;
+        }
+
+        // Parse code chunks by file path
+        String[] chunks = codeChunks.split("//\\s+");
+        Map<String, StringBuilder> dirCodeMap = new LinkedHashMap<>();
+
+        for (String chunk : chunks) {
+            if (chunk.trim().isEmpty())
+                continue;
+
+            // Extract file path from chunk header
+            int firstNewline = chunk.indexOf('\n');
+            if (firstNewline == -1)
+                continue;
+
+            String header = chunk.substring(0, firstNewline).trim();
+            String code = chunk.substring(firstNewline + 1).trim();
+
+            // Extract directory from file path
+            String directory = "root";
+            if (header.contains("/")) {
+                int lastSlash = header.lastIndexOf('/');
+                directory = header.substring(0, lastSlash);
+            }
+
+            // Group code by directory
+            dirCodeMap.computeIfAbsent(directory, k -> new StringBuilder())
+                    .append(code).append("\n\n");
+        }
+
+        // Create concise summaries for each directory
+        for (Map.Entry<String, StringBuilder> entry : dirCodeMap.entrySet()) {
+            String dir = entry.getKey();
+            String code = entry.getValue().toString();
+
+            List<String> summaries = new ArrayList<>();
+
+            // Pattern-based summarization (lightweight, no LLM needed)
+            // Detect imports/exports
+            if (code.contains("import ") || code.contains("require(")) {
+                long importCount = code.lines().filter(l -> l.contains("import ") || l.contains("require(")).count();
+                summaries.add("Dependencies: " + importCount + " imports detected");
+            }
+
+            // Detect class/function definitions
+            long classCount = code.lines().filter(l -> l.matches(".*\\b(class|interface|struct|enum)\\s+\\w+.*"))
+                    .count();
+            if (classCount > 0) {
+                summaries.add("Contains " + classCount + " class/type definitions");
+            }
+
+            long functionCount = code.lines().filter(l -> l.matches(".*(function|def|fn|func|async|=>).*")).count();
+            if (functionCount > 0) {
+                summaries.add("Contains " + functionCount + " function definitions");
+            }
+
+            // Detect API/route patterns
+            if (code.matches(".*(@app\\.(get|post|put|delete)|@RequestMapping|@GetMapping|@PostMapping|router\\.).*")) {
+                summaries.add("Defines API routes/endpoints");
+            }
+
+            // Detect database/model patterns
+            if (code.contains("@Entity") || code.contains("@Table") ||
+                    code.contains("Schema") || code.contains("Model")) {
+                summaries.add("Contains data models/entities");
+            }
+
+            // Detect configuration
+            if (code.contains("config") || code.contains("Config") || code.contains("@Configuration")) {
+                summaries.add("Defines application configuration");
+            }
+
+            // Fallback summary if no patterns matched
+            if (summaries.isEmpty()) {
+                int loc = code.split("\n").length;
+                summaries.add("Source code with ~" + loc + " lines");
+            }
+
+            dirSummaries.put(dir, summaries);
+        }
+
+        return dirSummaries;
+    }
+
+    /**
+     * PHASE 4: Extract global project context for injection into every batch.
+     * This ensures batches have consistent understanding of the overall project.
+     * 
+     * @param repoUrl     Repository URL
+     * @param fullContext Full API context string
+     * @return Concise global context header (project name, framework, tech stack)
+     */
+    private String extractGlobalProjectContext(String repoUrl, String fullContext) {
+        StringBuilder globalCtx = new StringBuilder();
+
+        // Extract project name from repo URL
+        String projectName = "Unknown Project";
+        if (repoUrl != null && !repoUrl.isBlank()) {
+            // Extract from URL like github.com/user/project or gitlab.com/user/project
+            String[] parts = repoUrl.split("/");
+            if (parts.length > 0) {
+                projectName = parts[parts.length - 1].replace(".git", "");
+            }
+        }
+
+        globalCtx.append("Project: ").append(projectName).append("\n");
+
+        // Detect framework/tech stack from code context
+        String framework = "Unknown";
+        String language = "Unknown";
+
+        if (fullContext != null) {
+            String lowerCtx = fullContext.toLowerCase();
+
+            // Framework detection
+            if (lowerCtx.contains("fastapi") || lowerCtx.contains("@app.get") || lowerCtx.contains("@app.post")) {
+                framework = "FastAPI";
+                language = "Python";
+            } else if (lowerCtx.contains("flask") || lowerCtx.contains("@app.route")) {
+                framework = "Flask";
+                language = "Python";
+            } else if (lowerCtx.contains("django") || lowerCtx.contains("urlpatterns")) {
+                framework = "Django";
+                language = "Python";
+            } else if (lowerCtx.contains("@restcontroller") || lowerCtx.contains("@requestmapping") ||
+                    lowerCtx.contains("spring")) {
+                framework = "Spring Boot";
+                language = "Java";
+            } else if (lowerCtx.contains("express")
+                    && (lowerCtx.contains("router.get") || lowerCtx.contains("app.get"))) {
+                framework = "Express.js";
+                language = "TypeScript/JavaScript";
+            } else if (lowerCtx.contains("nestjs") || lowerCtx.contains("@controller")) {
+                framework = "NestJS";
+                language = "TypeScript";
+            } else if (lowerCtx.contains("gin") || lowerCtx.contains("http.handlefunc")) {
+                framework = "Gin / Go net/http";
+                language = "Go";
+            } else if (lowerCtx.contains("axum") || lowerCtx.contains("actix")) {
+                framework = lowerCtx.contains("axum") ? "Axum" : "Actix-web";
+                language = "Rust";
+            }
+
+            // If no framework detected but language is clear from file extensions
+            if ("Unknown".equals(language)) {
+                if (lowerCtx.contains(".py") || lowerCtx.contains("def ")) {
+                    language = "Python";
+                } else if (lowerCtx.contains(".java") || lowerCtx.contains("public class")) {
+                    language = "Java";
+                } else if (lowerCtx.contains(".ts") || lowerCtx.contains(".tsx") || lowerCtx.contains("const ")) {
+                    language = "TypeScript";
+                } else if (lowerCtx.contains(".go") || lowerCtx.contains("func ")) {
+                    language = "Go";
+                }
+            }
+        }
+
+        globalCtx.append("Framework: ").append(framework).append("\n");
+        globalCtx.append("Language: ").append(language).append("\n");
+        globalCtx.append("Type: Backend API\n");
+
+        return globalCtx.toString();
     }
 }

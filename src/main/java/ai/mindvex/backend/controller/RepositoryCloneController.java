@@ -49,10 +49,17 @@ public class RepositoryCloneController {
                     User user = userRepository.findByEmail(userDetails.getUsername()).orElse(null);
                     if (user != null) {
                         githubToken = user.getGithubAccessToken();
+                        if (githubToken != null && !githubToken.isBlank()) {
+                            log.info("[Clone] GitHub token found for user (length: {})", githubToken.length());
+                        } else {
+                            log.warn("[Clone] User authenticated but no GitHub token stored. Private repos will fail.");
+                        }
                     }
                 } catch (Exception e) {
                     log.debug("[Clone] No GitHub token available: {}", e.getMessage());
                 }
+            } else {
+                log.warn("[Clone] No authentication provided. Only public repos accessible.");
             }
 
             // Create temp directory for cloning
@@ -96,7 +103,13 @@ public class RepositoryCloneController {
 
             // Provide user-friendly error messages
             if (errorMessage != null) {
-                if (errorMessage.contains("not authorized") || errorMessage.contains("Authentication")) {
+                if (errorMessage.contains("git-upload-pack not permitted")) {
+                    errorMessage = "Repository access denied. This usually means: " +
+                            "1) Repository doesn't exist, " +
+                            "2) Repository is private and you need to link your GitHub account, or " +
+                            "3) Your GitHub token is invalid/expired. " +
+                            "Please verify the repository URL and check your GitHub connection in settings.";
+                } else if (errorMessage.contains("not authorized") || errorMessage.contains("Authentication")) {
                     errorMessage = "Authentication failed. Please connect your GitHub account.";
                 } else if (errorMessage.contains("not found") || errorMessage.contains("404")) {
                     errorMessage = "Repository not found. Please check the URL.";
@@ -116,7 +129,7 @@ public class RepositoryCloneController {
     /**
      * Clone repository with retry logic and exponential backoff.
      */
-    private Git cloneWithRetry(String repoUrl, Path targetDir, String accessToken, int maxAttempts) 
+    private Git cloneWithRetry(String repoUrl, Path targetDir, String accessToken, int maxAttempts)
             throws IOException {
         int attempt = 0;
         Exception lastException = null;
@@ -135,8 +148,7 @@ public class RepositoryCloneController {
                 if (accessToken != null && !accessToken.isBlank()) {
                     log.info("[Clone] Using GitHub authentication");
                     cloneCmd.setCredentialsProvider(
-                        new UsernamePasswordCredentialsProvider("oauth2", accessToken)
-                    );
+                            new UsernamePasswordCredentialsProvider("oauth2", accessToken));
                 }
 
                 Git git = cloneCmd.call();
@@ -163,7 +175,8 @@ public class RepositoryCloneController {
         // All attempts failed
         log.error("[Clone] All {} attempts failed for {}", maxAttempts, repoUrl);
         if (lastException != null) {
-            throw new IOException("Clone failed after " + maxAttempts + " attempts: " + lastException.getMessage(), lastException);
+            throw new IOException("Clone failed after " + maxAttempts + " attempts: " + lastException.getMessage(),
+                    lastException);
         } else {
             throw new IOException("Clone failed after " + maxAttempts + " attempts");
         }

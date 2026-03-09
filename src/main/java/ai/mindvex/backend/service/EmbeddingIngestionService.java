@@ -39,7 +39,10 @@ public class EmbeddingIngestionService {
     @Value("${gemini.api-key:#{null}}")
     private String geminiApiKey;
 
-    private static final int CHUNK_SIZE_LINES = 50;
+    private static final int CHUNK_SIZE_LINES = 50; // Legacy - kept for fallback
+    private static final int MAX_CHUNK_CHARS = 800; // Semantic chunking target
+    private static final int MIN_CHUNK_CHARS = 200; // Minimum viable context
+    private static final int OVERLAP_LINES = 7; // Context overlap between chunks
     private static final Set<String> SOURCE_EXTENSIONS = Set.of(
             ".ts", ".tsx", ".js", ".jsx", ".py", ".java", ".kt", ".go",
             ".rs", ".cs", ".cpp", ".c", ".h", ".rb", ".swift", ".md");
@@ -92,7 +95,8 @@ public class EmbeddingIngestionService {
             String relativePath = repoDir.relativize(file).toString().replace('\\', '/');
             try {
                 String content = Files.readString(file);
-                List<String> chunks = chunkCode(content);
+                String extension = relativePath.substring(relativePath.lastIndexOf('.'));
+                List<String> chunks = semanticChunkCode(content, extension);
 
                 for (int i = 0; i < chunks.size(); i++) {
                     String chunk = chunks.get(i);
@@ -243,7 +247,176 @@ public class EmbeddingIngestionService {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private List<String> chunkCode(String content) {
+    /**
+     * Semantic code chunking that preserves logical boundaries and context.
+     * 
+     * Strategy:
+     * 1. Split by double newlines (logical paragraphs)
+     * 2. Detect class/function signatures using regex
+     * 3. Ensure chunks have minimum overlap (5-10 lines)
+     * 4. Keep max chunk size ~500-800 chars for dense embeddings
+     * 
+     * @param content   Source code content
+     * @param extension File extension (.java, .py, .ts, etc.)
+     * @return List of semantically meaningful code chunks
+     */
+    private List<String> semanticChunkCode(String content, String extension) {
+        if (content == null || content.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        // Step 1: Split by logical boundaries (double newlines, class/function
+        // boundaries)
+        List<String> rawSegments = splitBySemanticBoundaries(content, extension);
+
+        // Step 2: Combine small segments and split large ones with overlap
+        List<String> finalChunks = new ArrayList<>();
+        StringBuilder currentChunk = new StringBuilder();
+        List<String> overlapBuffer = new ArrayList<>(); // Store last N lines for overlap
+
+        for (String segment : rawSegments) {
+            String[] segmentLines = segment.split("\n");
+
+            // If adding this segment would exceed max size, finalize current chunk
+            if (currentChunk.length() + segment.length() > MAX_CHUNK_CHARS && currentChunk.length() > MIN_CHUNK_CHARS) {
+                String chunk = currentChunk.toString().trim();
+                if (!chunk.isBlank()) {
+                    finalChunks.add(chunk);
+                }
+
+                // Start new chunk with overlap from previous chunk
+                currentChunk = new StringBuilder();
+                if (!overlapBuffer.isEmpty()) {
+                    currentChunk.append(String.join("\n", overlapBuffer)).append("\n");
+                }
+                overlapBuffer.clear();
+            }
+
+            currentChunk.append(segment);
+            if (!segment.endsWith("\n")) {
+                currentChunk.append("\n");
+            }
+
+            // Update overlap buffer with last N lines of current segment
+            if (segmentLines.length > 0) {
+                int startIdx = Math.max(0, segmentLines.length - OVERLAP_LINES);
+                for (int i = startIdx; i < segmentLines.length; i++) {
+                    if (overlapBuffer.size() >= OVERLAP_LINES) {
+                        overlapBuffer.remove(0);
+                    }
+                    overlapBuffer.add(segmentLines[i]);
+                }
+            }
+        }
+
+        // Add final chunk
+        if (currentChunk.length() > 0) {
+            String chunk = currentChunk.toString().trim();
+            if (!chunk.isBlank()) {
+                finalChunks.add(chunk);
+            }
+        }
+
+        // Fallback to line-based chunking if semantic chunking produced strange results
+        if (finalChunks.isEmpty() || (finalChunks.size() == 1 && content.split("\n").length > 100)) {
+            log.debug("[SemanticChunking] Falling back to line-based chunking");
+            return chunkCodeLegacy(content);
+        }
+
+        return finalChunks;
+    }
+
+    /**
+     * Split code by semantic boundaries (functions, classes, logical blocks).
+     */
+    private List<String> splitBySemanticBoundaries(String content, String extension) {
+        List<String> segments = new ArrayList<>();
+
+        // Pattern library for different languages
+        String boundaryPattern = null;
+
+        switch (extension.toLowerCase()) {
+            case ".java", ".kt", ".cs", ".cpp", ".c", ".h":
+                // Match class/interface/method declarations
+                boundaryPattern = "(?m)^\\s*(public|private|protected|static|final|abstract)?\\s*(class|interface|enum|void|int|String|boolean|\\w+)\\s+\\w+\\s*[\\(\\{]";
+                break;
+            case ".py":
+                // Match def/class declarations
+                boundaryPattern = "(?m)^(class|def|async\\s+def)\\s+\\w+";
+                break;
+            case ".js", ".ts", ".jsx", ".tsx":
+                // Match function/class/export declarations
+                boundaryPattern = "(?m)^\\s*(export\\s+)?(default\\s+)?(class|function|const|let|var)\\s+\\w+\\s*[=\\(]";
+                break;
+            case ".go":
+                // Match func declarations
+                boundaryPattern = "(?m)^func\\s+\\w+";
+                break;
+            case ".rs":
+                // Match fn/struct/impl declarations
+                boundaryPattern = "(?m)^\\s*(pub\\s+)?(fn|struct|impl|trait)\\s+\\w+";
+                break;
+            case ".rb":
+                // Match def/class declarations
+                boundaryPattern = "(?m)^\\s*(class|module|def)\\s+\\w+";
+                break;
+            case ".swift":
+                // Match func/class/struct declarations
+                boundaryPattern = "(?m)^\\s*(public|private|internal)?\\s*(func|class|struct|enum)\\s+\\w+";
+                break;
+            default:
+                break;
+        }
+
+        // First try: Split by detected boundaries
+        if (boundaryPattern != null) {
+            String[] parts = content.split(boundaryPattern);
+            if (parts.length > 1) {
+                // Reconstruct segments with their headers
+                java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(boundaryPattern);
+                java.util.regex.Matcher matcher = pattern.matcher(content);
+                List<String> headers = new ArrayList<>();
+                while (matcher.find()) {
+                    headers.add(matcher.group());
+                }
+
+                // Add first part (before any header)
+                if (!parts[0].trim().isEmpty()) {
+                    segments.add(parts[0]);
+                }
+
+                // Add rest with headers attached
+                for (int i = 1; i < parts.length && i - 1 < headers.size(); i++) {
+                    segments.add(headers.get(i - 1) + parts[i]);
+                }
+
+                if (!segments.isEmpty()) {
+                    return segments;
+                }
+            }
+        }
+
+        // Fallback: Split by double newlines (paragraph breaks)
+        String[] paragraphs = content.split("\n\n+");
+        for (String para : paragraphs) {
+            if (!para.trim().isBlank()) {
+                segments.add(para);
+            }
+        }
+
+        // Ultimate fallback: return whole content as one segment (will be chunked by
+        // size)
+        if (segments.isEmpty()) {
+            segments.add(content);
+        }
+
+        return segments;
+    }
+
+    /**
+     * Legacy line-based chunking (fallback).
+     */
+    private List<String> chunkCodeLegacy(String content) {
         String[] lines = content.split("\n");
         List<String> chunks = new ArrayList<>();
 
